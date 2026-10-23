@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EditorState} from '@codemirror/state';
 import {insertNewlineAndIndent,indentMore,indentLess} from '@codemirror/commands';
-import {languageExtension,indentationExtensions,codePreviewLines} from '../src/editor.js';
+import {languageExtension,indentationExtensions,codePreviewLines,compactPreviewLines} from '../src/editor.js';
 test('C and Rust Enter uses configured automatic indentation',()=>{
   for(const [type,doc] of [['c','int main() {'],['rust','fn main() {']]){
     let state=EditorState.create({doc,selection:{anchor:doc.length},extensions:[languageExtension(type),...indentationExtensions(4)]});
@@ -35,4 +35,29 @@ test('comment filtering handles language-specific syntax, nested Rust comments a
   assert.equal(codePreviewLines([{id:'sql',text:"SELECT '--keep'; -- hide"}],'sql')[0].text,"SELECT '--keep';");
   assert.equal(codePreviewLines([{id:'rs',text:'/* outer /* nested */ end */ call();'}],'rust')[0].text.trim(),'call();');
   assert.equal(codePreviewLines([{id:'text',text:'// keep all'}],'plain')[0].text,'// keep all');
+});
+
+test('canvas compacts blank and whitespace rows with comments shown or hidden without changing source',()=>{
+  const lines=['','function outer() {','  \t','  // note','','  work();','}', ''].map((text,index)=>({id:'line'+index,text}));
+  const original=structuredClone(lines);
+  const hidden=compactPreviewLines(codePreviewLines(lines));
+  assert.deepEqual(hidden.map(({id,index})=>[id,index]),[['line1',1],['line5',5],['line6',6]]);
+  const shown=compactPreviewLines(lines.map((line,index)=>({...line,index})));
+  assert.deepEqual(shown.map(line=>line.index),[1,3,5,6]);
+  assert.equal(shown[1].text,'  // note');
+  assert.deepEqual(lines,original);
+  assert.deepEqual(compactPreviewLines(codePreviewLines([{id:'blank',text:' \t'}])),[]);
+});
+
+test('compacted preview retains blank and hidden comment anchors for edges and internal entries',()=>{
+  const lines=['','  ','// note','work();',''].map((text,index)=>({id:'line'+index,text}));
+  const anchors=new Set(['line1','line2','line4']);
+  const hidden=compactPreviewLines(codePreviewLines(lines),anchors);
+  assert.deepEqual(hidden.map(line=>line.index),[1,2,3,4]);
+  assert.equal(hidden[0].hiddenBlankAnchor,true);
+  assert.equal(hidden[1].hiddenCommentAnchor,true);
+  assert.equal(hidden[3].hiddenBlankAnchor,true);
+  const shown=compactPreviewLines(lines.map((line,index)=>({...line,index})),anchors);
+  assert.equal(shown[0].hiddenBlankAnchor,true);
+  assert.equal(shown[1].text,'// note');
 });

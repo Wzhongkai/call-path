@@ -28,6 +28,14 @@ export function codePreviewLines(lines,language='javascript'){
     return {...line,index,text:comments.length?clean.trimEnd():clean,commentOnly:comments.length>0&&!clean.trim()};
   });
 }
+// Compact only the preview; retain source indices and any externally used anchors.
+export function compactPreviewLines(lines,anchorIds=new Set()){
+  return lines.flatMap(line=>{
+    if(!line.commentOnly&&line.text.trim())return [line];
+    if(!anchorIds.has(line.id))return [];
+    return [{...line,text:'',...(line.commentOnly?{hiddenCommentAnchor:true}:{hiddenBlankAnchor:true})}];
+  });
+}
 export function createCodeEditor({parent,doc,language='javascript',indentSize=4,onChange,readOnly=false}){
   const languageSlot=new Compartment(),indentSlot=new Compartment();
   const view=new EditorView({parent,state:EditorState.create({doc,extensions:[
