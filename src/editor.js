@@ -28,12 +28,12 @@ export function codePreviewLines(lines,language='javascript'){
     return {...line,index,text:comments.length?clean.trimEnd():clean,commentOnly:comments.length>0&&!clean.trim()};
   });
 }
-export function createCodeEditor({parent,doc,language='javascript',indentSize=4,onChange}){
+export function createCodeEditor({parent,doc,language='javascript',indentSize=4,onChange,readOnly=false}){
   const languageSlot=new Compartment(),indentSlot=new Compartment();
   const view=new EditorView({parent,state:EditorState.create({doc,extensions:[
-    basicSetup,keymap.of([indentWithTab]),oneDark,
+    basicSetup,keymap.of([indentWithTab]),oneDark,EditorState.readOnly.of(readOnly),EditorView.editable.of(!readOnly),
     languageSlot.of(languageExtension(language)),indentSlot.of(indentationExtensions(indentSize)),
-    EditorView.contentAttributes.of({'aria-label':'代码编辑器',spellcheck:'false'}),
+    EditorView.contentAttributes.of({'aria-label':'代码编辑器','aria-readonly':String(readOnly),tabindex:'0',spellcheck:'false'}),
     EditorView.theme({
       '&':{height:'100%',backgroundColor:'#101a2a',color:'#d0dced',fontSize:'13px'},
       '.cm-scroller':{fontFamily:'"IBM Plex Mono",Consolas,monospace',lineHeight:'1.8',overflow:'auto'},

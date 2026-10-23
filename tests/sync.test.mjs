@@ -27,7 +27,10 @@ test('recovery resumes only against the same revision and discarded drafts stay 
   const other=setup(async b=>({revision:b.revision+1})).sync;other.recover({revision:4,workspace:{restored:true}});await other.flush();assert.equal(other.revision,5);other.dispose();
 });
 test('backend round-trip fixture includes valid frontend nodes, entries, edges and project state',async()=>{
-  const source=JSON.parse(await readFile(new URL('../backend/tests/fixtures/workspace.json',import.meta.url),'utf8'));assert.deepEqual(validateWorkspace(source),source);assert.ok(source.projects[0].document.nodes.some(n=>n.innerFunctions?.length));
+  const source=JSON.parse(await readFile(new URL('../backend/tests/fixtures/workspace.json',import.meta.url),'utf8')),migrated=validateWorkspace(source);
+  assert.deepEqual(validateWorkspace(migrated),migrated);assert.deepEqual(migrated.projects[0].document.edges,source.projects[0].document.edges);
+  assert.ok(migrated.projects[0].document.nodes.some(n=>n.innerFunctions?.length));
+  for(const block of [...migrated.projects[0].document.nodes,...migrated.projects[0].document.groups])assert.deepEqual(block.positions.logic,block.positions.code);
 });
 test('one tab acknowledging a save does not erase another tab recovery draft',async()=>{
   const drafts=new Map(),storage={setItem:(k,v)=>drafts.set(k,v),removeItem:k=>drafts.delete(k)};

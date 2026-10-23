@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createDemo,reconcileLines,repairAnchors,traceNodes,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag} from '../dist/model.js';
+import {createDemo,reconcileLines,repairAnchors,traceNodes,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition,clone} from '../dist/model.js';
 test('demo and JSON roundtrip retain valid line anchors, linked returns and groups',()=>{const doc=createDemo();assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(doc))),doc);});
 test('inserting before a call retains its original line identity',()=>{const doc=createDemo(),n=doc.nodes[0],edge=doc.edges[0],id=edge.fromLine;n.code=reconcileLines(n.code,'// extra header\n'+n.code.map(l=>l.text).join('\n'));assert.equal(n.code[2].id,id);assert.equal(repairAnchors(doc),0);});
 test('removing a connected line detaches safely to function level',()=>{const doc=createDemo(),n=doc.nodes[0],id=doc.edges[0].fromLine;n.code=reconcileLines(n.code,n.code.filter(l=>l.id!==id).map(l=>l.text).join('\n'));assert.ok(repairAnchors(doc)>0);assert.equal(doc.edges[0].fromLine,null);assert.doesNotThrow(()=>validateDocument(doc));});
@@ -28,3 +28,26 @@ test('inner function entry stores only name and stable line reference and surviv
 });
 
 test('inner entry validation rejects missing lines and duplicate interface rows',()=>{const doc=createDemo(),node=doc.nodes[0];node.innerFunctions=[{id:'inner1',name:'inner',lineId:'missing'}];assert.throws(()=>validateDocument(doc));node.innerFunctions=[{id:'inner1',name:'inner',lineId:node.code[1].id},{id:'inner2',name:'another',lineId:node.code[1].id}];assert.throws(()=>validateDocument(doc));});
+
+test('legacy layouts normalize using the selected view without changing the source or code anchors',()=>{
+  const legacy=createDemo();for(const block of [...legacy.nodes,...legacy.groups])block.positions.logic={x:-100,y:20};
+  const source=clone(legacy),code=validateDocument(legacy,'code'),logic=validateDocument(legacy);
+  for(const [index,block] of [...code.nodes,...code.groups].entries()){
+    assert.deepEqual(block.positions.logic,block.positions.code);
+    assert.deepEqual(block.positions.code,[...source.nodes,...source.groups][index].positions.code);
+  }
+  for(const block of [...logic.nodes,...logic.groups])assert.deepEqual(block.positions.code,{x:-100,y:20});
+  assert.deepEqual(legacy,source);assert.deepEqual(code.edges,legacy.edges);assert.deepEqual(code.nodes[0].code,legacy.nodes[0].code);
+});
+
+test('shared positions survive movement in either mode, mutable keyboard references and history roundtrips',()=>{
+  const doc=createDemo(),before=clone(doc),block=doc.nodes[0],logicRef=block.positions.logic,codeRef=block.positions.code;
+  setBlockPosition(block,{x:1240,y:-80});assert.deepEqual(block.positions.logic,block.positions.code);
+  codeRef.x+=20;codeRef.y+=40;setBlockPosition(block,codeRef);
+  assert.equal(block.positions.logic,logicRef);assert.equal(block.positions.code,codeRef);
+  assert.deepEqual(logicRef,{x:1260,y:-40});
+  const group=doc.groups[0];setBlockPosition(group,{x:400,y:300});
+  for(const id of group.members){const member=doc.nodes.find(n=>n.id===id);setBlockPosition(member,{x:member.positions.logic.x+40,y:member.positions.logic.y+60});}
+  const after=validateDocument(clone(doc),'code');for(const item of [...after.nodes,...after.groups])assert.deepEqual(item.positions.logic,item.positions.code);
+  const restored=validateDocument(before);assert.deepEqual(restored,before);assert.notDeepEqual(after.nodes[0].positions,restored.nodes[0].positions);
+});

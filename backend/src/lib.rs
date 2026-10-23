@@ -1,3 +1,4 @@
+mod shares;
 mod validation;
 
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
@@ -164,7 +165,7 @@ pub async fn open_state(config: Config) -> Result<AppState, Box<dyn std::error::
     let schema_version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(&db)
         .await?;
-    if schema_version > 1 {
+    if schema_version > 2 {
         return Err(
             "Database schema is newer than this server; do not downgrade without a migration"
                 .into(),
@@ -200,6 +201,12 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .nest("/auth", auth)
         .route("/workspace", get(load_workspace).put(save_workspace))
+        .route("/shares", get(shares::list).post(shares::create))
+        .route(
+            "/shares/{token}",
+            axum::routing::put(shares::update).delete(shares::revoke),
+        )
+        .route("/shared/{token}", get(shares::read))
         .fallback(|| async { ApiError(StatusCode::NOT_FOUND, "接口不存在".into()) })
         .layer(DefaultBodyLimit::max(MAX_WORKSPACE + 1024 * 1024));
     Router::new()
@@ -242,14 +249,14 @@ async fn security(State(state): State<AppState>, request: Request, next: Next) -
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
     );
-    headers.insert("referrer-policy", HeaderValue::from_static("same-origin"));
+    headers.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
     headers.insert("content-security-policy", HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"));
     response
 }
 async fn configuration(State(state): State<AppState>) -> Json<Value> {
     Json(
-        json!({"backend":true,"registration":state.0.config.registration,"maxWorkspaceBytes":MAX_WORKSPACE}),
+        json!({"backend":true,"registration":state.0.config.registration,"sharing":true,"maxWorkspaceBytes":MAX_WORKSPACE}),
     )
 }
 async fn health(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {

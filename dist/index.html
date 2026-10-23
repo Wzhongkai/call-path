@@ -16,7 +16,7 @@
     <header class="topbar">
       <a class="brand" href="./" aria-label="Callpath 首页"><span class="brand-mark">⑂</span>callpath<span class="demo-badge">DEMO</span></a>
       <div class="project-crumb"><button id="projects-btn" class="button secondary" title="新建、切换和管理项目">▱ 项目 ▾</button><span class="slash">/</span><input id="project-title" aria-label="项目名称" maxlength="80" /><span class="local-badge">本地</span></div>
-      <div class="top-actions"><span id="save-status"><i></i> 已保存到本机</span><button id="account-btn" class="button secondary">账号</button><button id="help-btn" class="icon-btn" title="使用指南" aria-label="使用指南">?</button><button id="export-btn" class="button secondary"><span>↗</span> 导出项目</button></div>
+      <div class="top-actions"><span id="save-status"><i></i> 已保存到本机</span><button id="account-btn" class="button secondary">账号</button><button id="help-btn" class="icon-btn" title="使用指南" aria-label="使用指南">?</button><button id="share-btn" class="button secondary" hidden>分享项目</button><button id="export-btn" class="button secondary"><span>↗</span> 导出项目</button></div>
     </header>
     <aside class="sidebar">
       <div class="sidebar-controls"><button id="toggle-sidebar" class="icon-btn" title="收起文件树" aria-label="收起或展开文件树" aria-expanded="true">‹</button></div>
@@ -48,6 +48,7 @@
   <dialog id="jump-dialog" aria-label="选择跳转目标"></dialog>
   <dialog id="projects-dialog" aria-label="项目管理"></dialog>
   <dialog id="account-dialog" aria-label="账号与同步"></dialog>
+  <dialog id="share-dialog" aria-label="项目分享"></dialog>
   <input id="import-file" type="file" accept=".json,application/json" hidden />
   <dialog id="help-dialog"><div class="dialog-heading"><span class="eyebrow">A LITTLE GUIDE</span><button id="close-help" class="icon-btn" aria-label="关闭">×</button></div><h2>从一个函数，走进整个过程。</h2><p>两种视角，同一张调用图。</p><div class="help-grid"><article><b>01</b><h3>搭建你的函数</h3><p>添加函数，在弹窗中填写名称、代码、多个标签和备注。拖动块的标题调整位置。</p></article><article><b>02</b><h3>连接调用与返回</h3><p>选择「调用」后依次点击两个函数；代码模式点击某行右侧的圆点发起调用。选中调用线可添加关联返回。</p></article><article><b>03</b><h3>切换视角，聚焦链路</h3><p>逻辑模式看全局，代码模式看具体调用行。点击标签筛选，在函数弹窗中追踪上下游。Shift 多选后可创建分区；坐标可精确输入。</p></article><article><b>04</b><h3>带走你的思路</h3><p>内容自动保存在当前浏览器。导出 JSON 备份或跨设备导入，也能导出当前视图 SVG。</p></article></div><div class="help-footer"><span><kbd>V</kbd> 选择 <kbd>C</kbd> 调用 <kbd>R</kbd> 返回 <kbd>F</kbd> 适应画布 <kbd>Esc</kbd> 取消</span><button id="start-btn" class="button primary">开始探索 →</button></div></dialog>
   <dialog id="export-dialog"><div class="dialog-heading"><span class="eyebrow">TAKE IT WITH YOU</span><button id="close-export" class="icon-btn" aria-label="关闭">×</button></div><h2>把调用过程带走</h2><p>JSON 保留完整数据，可重新导入继续编辑。</p><button id="download-json" class="export-option"><span>﹛﹜</span><div><strong>项目文件 · JSON</strong><small>函数、代码、连线、标签、备注和布局</small></div><span>↓</span></button><button id="download-svg" class="export-option"><span>◇</span><div><strong>当前视图 · SVG</strong><small>适合放进笔记、文档或分享</small></div><span>↓</span></button></dialog>

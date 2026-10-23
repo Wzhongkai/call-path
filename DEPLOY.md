@@ -121,6 +121,11 @@ docker compose start app
 | `POST /api/auth/password` | 校验旧密码并更改密码 |
 | `GET /api/workspace` | 当前账号的工作空间和 revision |
 | `PUT /api/workspace` | `{revision, workspace}`，冲突返回 409 |
+| `GET /api/shares` | 登录账号的分享列表及链接 |
+| `POST /api/shares` | `{projectId, revision}`，发布已保存项目的只读快照 |
+| `PUT /api/shares/{token}` | 相同请求体，更新自己发布的快照，保留链接 |
+| `DELETE /api/shares/{token}` | 撤销自己的分享链接 |
+| `GET /api/shared/{token}` | 免登录读取一个已发布的项目；无写入接口 |
 
 写接口需要 `X-Callpath-Request: 1`；浏览器的 `Origin` 必须与 `PUBLIC_ORIGIN` 一致。前端附带 `X-Callpath-User` 绑定当前页账号，后端验证其与会话一致。Cookie 为 HttpOnly、SameSite=Lax、有效期 7 天，HTTPS 下为 Secure。接口不开放跨域访问。TLS 必须由反向代理提供。
 
@@ -130,4 +135,8 @@ cargo test --locked --manifest-path backend/Cargo.toml
 cargo clippy --locked --manifest-path backend/Cargo.toml --all-targets -- -D warnings
 ```
 
-前端测试覆盖草稿恢复、断线重试、连续编辑的串行保存和冲突处理；后端集成测试覆盖账号隔离、数据库重开、并发版本冲突、跨站请求拒绝、会话失效、密码修改及限流。
+前端测试覆盖草稿恢复、断线重试、连续编辑的串行保存、冲突处理、共享布局与弹窗拖动；后端集成测试覆盖账号隔离、数据库重开、并发版本冲突、跨站请求拒绝、会话失效、密码修改、限流、只读分享的权限与快照更新、撤销，以及旧版数据库升级。
+
+分享采用随机 256 位链接，仅包含所选项目，访客不会读取账号的工作空间。全部代码、备注和标签均包含在分享快照中，持有链接的人可以阅读和导出。编辑后需手动更新分享；撤销后新请求返回 404，已被访客保存的副本无法收回。分享数量上限为每账号 100 个，快照合计不超过 20 MiB。
+
+本版启动时将数据库版本从 1 升至 2，仅新增 `project_shares` 表，不改动账号和工作空间字段。升级前在线备份 SQLite 数据库；旧二进制会拒绝版本 2。仅在回滚至本项目 v1 且确认没有其他迁移时，可停止应用，将 `PRAGMA user_version` 恢复为 1 后启动旧版本；保留新增表即可，无需覆盖工作空间。后续再升级时会重新启用已有分享数据。

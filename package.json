@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node server.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/app.js && node --check dist/model.js && node --check dist/geometry.js && node --check dist/highlight.js && node --check dist/workspace.js && node --check dist/account.js && node --check dist/sync.js",
+    "check": "node --check dist/app.js && node --check dist/model.js && node --check dist/geometry.js && node --check dist/highlight.js && node --check dist/workspace.js && node --check dist/account.js && node --check dist/sync.js && node --check dist/dialog.js && node --check dist/share.js",
     "build:editor": "node scripts/build-editor.mjs"
   },
   "packageManager": "pnpm@11.25.0",
