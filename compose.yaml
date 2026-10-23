@@ -5,6 +5,7 @@ services:
     init: true
     environment:
       PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set PUBLIC_ORIGIN in .env}
+      BASE_PATH: ${BASE_PATH:-}
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
       ALLOW_INSECURE_HTTP: ${ALLOW_INSECURE_HTTP:-false}
       RUST_LOG: callpath_server=info

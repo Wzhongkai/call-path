@@ -28,7 +28,7 @@ docker compose logs --tail=100 app
 
 浏览器必须通过 `PUBLIC_ORIGIN` 的地址访问。生产环境应设为 HTTPS；后端会据此开启 Cookie 的 `Secure` 属性。HTTP 页面无法设置和使用这种 Cookie。若域名或协议改变，更新 `.env` 并重建容器配置。
 
-部署在子路径时，例如 `https://callpath.example.com/code/`：保持 `PUBLIC_ORIGIN=https://callpath.example.com`，另设 `BASE_PATH=/code`。反向代理用 `location ^~ /code/` 与末尾带斜杠的 `proxy_pass http://127.0.0.1:8080/`，将前缀去掉后交给后端。前端从自身模块位置计算 API 路径，Cookie 仅发送至 `/code/`。`/code` 应重定向到 `/code/`，以保证资源相对路径正确。可参考 [deploy/nginx.conf](deploy/nginx.conf)。Docker Compose 用户还需在 `compose.yaml` 的 `environment` 中添加 `BASE_PATH: /code`。
+部署在子路径时，例如 `https://callpath.example.com/code/`：保持 `PUBLIC_ORIGIN=https://callpath.example.com`，另设 `BASE_PATH=/code`。Docker Compose 用户在 `.env` 中设置这两项即可。反向代理用 `location ^~ /code/` 与末尾带斜杠的 `proxy_pass http://127.0.0.1:8080/`，将前缀去掉后交给后端。前端从自身模块位置计算 API 路径，Cookie 仅发送至 `/code/`。`/code` 应重定向到 `/code/`，以保证资源相对路径正确。可参考 [deploy/nginx.conf](deploy/nginx.conf)。
 
 本机 Docker 试用可保留 `.env.example` 的 `http://127.0.0.1:8080`，用该地址访问。临时内网 HTTP 需要同时改端口映射、`PUBLIC_ORIGIN` 并显式设置 `ALLOW_INSECURE_HTTP=true`；正式部署使用 HTTPS。
 
