@@ -1,0 +1,56 @@
+# Dependencies and build caches (dist/ is intentionally versioned)
+node_modules/
+/backend/target/
+.pnpm-store/
+coverage/
+.cache/
+
+# Runtime data, workspace exports and backups
+/data/
+/backups/
+/exports/
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.bak
+*.tmp
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+.ssh/
+/private/
+/secrets/
+/credentials/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# Local agent / hosting metadata and editor settings
+.openai/
+.codex/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+
+# Keep machine-specific deployment material local; publish generic examples only
+/deploy/*
+!/deploy/Caddyfile
+!/deploy/callpath.service
+!/deploy/nginx.conf

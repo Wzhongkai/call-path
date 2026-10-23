@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0c1220" />
+  <meta name="description" content="在逻辑与代码之间，理清每一次函数调用。支持行级连线、参数、返回值、备注和标签筛选。" />
+  <title>Callpath · 函数调用画布</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%2365b9ff'/%3E%3Cpath d='M11 12v16m0-8h16m-6-6 6 6-6 6' fill='none' stroke='%230c1220' stroke-width='3'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./editor.css" />
+  <link rel="stylesheet" href="./theme.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Callpath 首页"><span class="brand-mark">⑂</span>callpath<span class="demo-badge">DEMO</span></a>
+      <div class="project-crumb"><button id="projects-btn" class="button secondary" title="新建、切换和管理项目">▱ 项目 ▾</button><span class="slash">/</span><input id="project-title" aria-label="项目名称" maxlength="80" /><span class="local-badge">本地</span></div>
+      <div class="top-actions"><span id="save-status"><i></i> 已保存到本机</span><button id="account-btn" class="button secondary">账号</button><button id="help-btn" class="icon-btn" title="使用指南" aria-label="使用指南">?</button><button id="export-btn" class="button secondary"><span>↗</span> 导出项目</button></div>
+    </header>
+    <aside class="sidebar">
+      <div class="sidebar-controls"><button id="toggle-sidebar" class="icon-btn" title="收起文件树" aria-label="收起或展开文件树" aria-expanded="true">‹</button></div>
+      <div class="project-heading"><div class="project-icon">▱</div><div><strong id="sidebar-project-name">项目文件</strong><small id="sidebar-project-count"></small></div></div>
+      <label class="search-box"><span>⌕</span><input id="search" placeholder="搜索函数、文件或备注…" aria-label="搜索函数、文件或备注"/><kbd>/</kbd></label>
+      <div class="section-title">文件与代码 <span id="function-count"></span><button id="add-sidebar" class="tiny-btn" title="添加函数" aria-label="添加函数">＋</button></div>
+      <div id="function-list" class="function-list"></div>
+      <div class="sidebar-divider"></div>
+      <div class="section-title">标签筛选<button id="tag-match" class="text-btn" title="切换标签匹配方式">任一匹配</button></div>
+      <div id="tag-list" class="tag-list"></div><button id="tag-edit-btn" class="text-btn tag-edit-toggle" hidden>双击标记函数</button><div id="tag-assignment" hidden><span id="tag-assignment-name"></span><button id="exit-tag-assignment">结束标记，保留筛选</button></div>
+      <button id="clear-filter" class="clear-filter" hidden>清除筛选 ×</button>
+      <div class="sidebar-bottom"><button id="import-btn" class="text-btn">↥ 导入 JSON</button><button id="load-demo" class="text-btn" title="载入示例，可撤销">载入示例</button><span>v0.1</span></div>
+    </aside>
+    <main class="main">
+      <div class="canvas-topbar"><div class="mode-switch" role="group" aria-label="画布模式"><button data-mode="logic" class="active">◇ 逻辑模式</button><button data-mode="code">〈/〉代码模式</button></div><div class="canvas-actions"><button id="comments-btn" class="button secondary" aria-pressed="false" title="仅影响画布预览，编辑器始终保留完整注释" hidden>显示注释</button><button id="undo-btn" class="icon-btn" title="撤销 Ctrl+Z" aria-label="撤销">↶</button><button id="redo-btn" class="icon-btn" title="重做 Ctrl+Shift+Z" aria-label="重做">↷</button><span class="vertical-divider"></span><button id="edit-selection" class="button secondary" disabled title="编辑选中的函数或分区 (Enter)">编辑选中</button><button id="group-btn" class="button secondary" title="按住 Shift 多选函数，再创建分区">▧ 分区</button><button id="add-btn" class="button primary">＋ 添加函数</button><button id="add-kind-btn" class="button secondary" aria-label="添加其他类型的块" title="添加结构体或宏定义">▾</button></div><div id="add-kind-menu" class="add-kind-menu" hidden><button data-add-kind="function">ƒ 函数块</button><button data-add-kind="struct">▦ 结构体</button><button data-add-kind="macro"># 宏定义 / define</button></div></div>
+      <div id="viewport" class="viewport" tabindex="0" aria-label="函数调用画布">
+        <div id="scene" class="scene"><div class="canvas-origin"><span>＋</span>0, 0</div><div id="groups"></div><svg id="edges" class="edges" aria-label="调用关系"></svg><div id="nodes"></div></div>
+        <div id="canvas-empty" class="canvas-empty" hidden><strong>从第一个函数开始</strong><p>添加函数，连接你的思路。</p><button id="empty-add" class="button primary">＋ 添加函数</button></div>
+        <div id="connection-hint" class="connection-hint" hidden></div>
+        <div id="filter-indicator" class="filter-indicator" hidden></div>
+        <div class="canvas-tools" role="group" aria-label="画布工具"><button data-tool="select" class="active" title="选择 / 拖动画布 (V)"><span>↖</span>选择</button><button data-tool="call" title="添加调用连线 (C)"><span>↗</span>调用</button><button data-tool="return" title="添加返回连线 (R)"><span>↩</span>返回</button><button id="click-connect-btn" title="连续点选两个端点连接，Esc 退出">⌁ 点选连线</button><span class="vertical-divider"></span><button id="snap-btn" class="active" title="20 px 网格吸附" aria-label="网格吸附" aria-pressed="true">⌗</button><button id="fit-btn" title="适应画布 (F)" aria-label="适应画布">⛶</button></div>
+        <div class="canvas-legend"><span><i class="line-solid"></i> 调用</span><span><i class="line-dashed"></i> 返回</span></div>
+        <div class="zoom-controls"><button id="zoom-out" aria-label="缩小">−</button><button id="zoom-value" title="重置到 100%">100%</button><button id="zoom-in" aria-label="放大">＋</button></div>
+      </div>
+      <footer class="statusbar"><div><span class="status-dot"></span><span id="graph-status"></span></div><span class="canvas-instructions">Shift 多选分区 · 拖动空白处平移 · 滚轮缩放</span><span id="mode-status">LOGIC VIEW</span></footer>
+    </main>
+  </div>
+  <dialog id="inspector" class="inspector" aria-label="编辑详情"></dialog>
+  <dialog id="jump-dialog" aria-label="选择跳转目标"></dialog>
+  <dialog id="projects-dialog" aria-label="项目管理"></dialog>
+  <dialog id="account-dialog" aria-label="账号与同步"></dialog>
+  <input id="import-file" type="file" accept=".json,application/json" hidden />
+  <dialog id="help-dialog"><div class="dialog-heading"><span class="eyebrow">A LITTLE GUIDE</span><button id="close-help" class="icon-btn" aria-label="关闭">×</button></div><h2>从一个函数，走进整个过程。</h2><p>两种视角，同一张调用图。</p><div class="help-grid"><article><b>01</b><h3>搭建你的函数</h3><p>添加函数，在弹窗中填写名称、代码、多个标签和备注。拖动块的标题调整位置。</p></article><article><b>02</b><h3>连接调用与返回</h3><p>选择「调用」后依次点击两个函数；代码模式点击某行右侧的圆点发起调用。选中调用线可添加关联返回。</p></article><article><b>03</b><h3>切换视角，聚焦链路</h3><p>逻辑模式看全局，代码模式看具体调用行。点击标签筛选，在函数弹窗中追踪上下游。Shift 多选后可创建分区；坐标可精确输入。</p></article><article><b>04</b><h3>带走你的思路</h3><p>内容自动保存在当前浏览器。导出 JSON 备份或跨设备导入，也能导出当前视图 SVG。</p></article></div><div class="help-footer"><span><kbd>V</kbd> 选择 <kbd>C</kbd> 调用 <kbd>R</kbd> 返回 <kbd>F</kbd> 适应画布 <kbd>Esc</kbd> 取消</span><button id="start-btn" class="button primary">开始探索 →</button></div></dialog>
+  <dialog id="export-dialog"><div class="dialog-heading"><span class="eyebrow">TAKE IT WITH YOU</span><button id="close-export" class="icon-btn" aria-label="关闭">×</button></div><h2>把调用过程带走</h2><p>JSON 保留完整数据，可重新导入继续编辑。</p><button id="download-json" class="export-option"><span>﹛﹜</span><div><strong>项目文件 · JSON</strong><small>函数、代码、连线、标签、备注和布局</small></div><span>↓</span></button><button id="download-svg" class="export-option"><span>◇</span><div><strong>当前视图 · SVG</strong><small>适合放进笔记、文档或分享</small></div><span>↓</span></button></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

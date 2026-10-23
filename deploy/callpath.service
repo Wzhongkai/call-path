@@ -1,0 +1,24 @@
+[Unit]
+Description=Callpath server
+After=network.target
+
+[Service]
+Type=simple
+User=callpath
+Group=callpath
+WorkingDirectory=/opt/callpath
+Environment=BIND=127.0.0.1:8080
+Environment=STATIC_DIR=/opt/callpath/dist
+Environment=DATABASE_PATH=/var/lib/callpath/callpath.sqlite3
+EnvironmentFile=/etc/callpath.env
+ExecStart=/opt/callpath/callpath-server
+StateDirectory=callpath
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

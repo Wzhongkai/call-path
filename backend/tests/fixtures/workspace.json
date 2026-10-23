@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "activeId": "project_5551a0a1-bf2a-42e2-88d6-2073a99a8f4f",
+  "projects": [
+    {
+      "id": "project_5551a0a1-bf2a-42e2-88d6-2073a99a8f4f",
+      "document": {
+        "schemaVersion": 1,
+        "title": "用户登录 · 调用分析",
+        "nodes": [
+          {
+            "id": "login",
+            "name": "handleLogin",
+            "description": "登录流程入口，串联校验与认证",
+            "tags": [
+              "入口",
+              "认证"
+            ],
+            "note": "先校验输入，再查询用户。只有身份验证通过才签发 token。\n可以沿着青蓝色调用线，追踪一次完整的登录过程。",
+            "color": "#71c9ef",
+            "positions": {
+              "logic": {
+                "x": 50,
+                "y": 180
+              },
+              "code": {
+                "x": 40,
+                "y": 170
+              }
+            },
+            "code": [
+              {
+                "id": "login_l1",
+                "text": "async function handleLogin(input) {"
+              },
+              {
+                "id": "login_l2",
+                "text": "  const data = validateInput(input);"
+              },
+              {
+                "id": "login_l3",
+                "text": "  const user = await findUser(data.email);"
+              },
+              {
+                "id": "login_l4",
+                "text": "  const ok = verifyPassword(data, user);"
+              },
+              {
+                "id": "login_l5",
+                "text": "  if (!ok) throw Error('认证失败');"
+              },
+              {
+                "id": "login_l6",
+                "text": "  const token = createToken(user);"
+              },
+              {
+                "id": "login_l7",
+                "text": "  return { user, token };"
+              },
+              {
+                "id": "login_l8",
+                "text": "}"
+              }
+            ],
+            "file": "src/auth/login.ts",
+            "language": "typescript",
+            "innerFunctions": [
+              {
+                "id": "test-inner",
+                "name": "inner_callback",
+                "lineId": "login_l2"
+              }
+            ]
+          },
+          {
+            "id": "validate",
+            "name": "validateInput",
+            "description": "检查邮箱与密码格式",
+            "tags": [
+              "校验",
+              "认证"
+            ],
+            "note": "输入不合法时抛出异常，后续调用不再继续。",
+            "color": "#8aaef0",
+            "positions": {
+              "logic": {
+                "x": 440,
+                "y": 90
+              },
+              "code": {
+                "x": 550,
+                "y": 70
+              }
+            },
+            "code": [
+              {
+                "id": "validate_l1",
+                "text": "function validateInput(input) {"
+              },
+              {
+                "id": "validate_l2",
+                "text": "  if (!input.email || !input.password) {"
+              },
+              {
+                "id": "validate_l3",
+                "text": "    throw Error('请填写邮箱和密码');"
+              },
+              {
+                "id": "validate_l4",
+                "text": "  }"
+              },
+              {
+                "id": "validate_l5",
+                "text": "  return input;"
+              },
+              {
+                "id": "validate_l6",
+                "text": "}"
+              }
+            ],
+            "file": "src/auth/validators.ts",
+            "language": "typescript"
+          },
+          {
+            "id": "find",
+            "name": "findUser",
+            "description": "通过邮箱查找用户记录",
+            "tags": [
+              "数据",
+              "认证"
+            ],
+            "note": "未找到用户时，应该返回统一的认证错误，避免泄露账号是否存在。",
+            "color": "#b5a1e7",
+            "positions": {
+              "logic": {
+                "x": 440,
+                "y": 340
+              },
+              "code": {
+                "x": 550,
+                "y": 480
+              }
+            },
+            "code": [
+              {
+                "id": "find_l1",
+                "text": "async function findUser(email) {"
+              },
+              {
+                "id": "find_l2",
+                "text": "  const user = await db.find(email);"
+              },
+              {
+                "id": "find_l3",
+                "text": "  if (!user) throw Error('认证失败');"
+              },
+              {
+                "id": "find_l4",
+                "text": "  return user;"
+              },
+              {
+                "id": "find_l5",
+                "text": "}"
+              }
+            ],
+            "file": "src/repositories/user.ts",
+            "language": "typescript"
+          },
+          {
+            "id": "verify",
+            "name": "verifyPassword",
+            "description": "比对输入密码与已存储的哈希",
+            "tags": [
+              "校验",
+              "认证"
+            ],
+            "note": "这里只是展示调用关系，示例代码不会被执行。真实密码比对应使用经过验证的密码哈希库。",
+            "color": "#d9b581",
+            "positions": {
+              "logic": {
+                "x": 830,
+                "y": 90
+              },
+              "code": {
+                "x": 1060,
+                "y": 70
+              }
+            },
+            "code": [
+              {
+                "id": "verify_l1",
+                "text": "function verifyPassword(data, user) {"
+              },
+              {
+                "id": "verify_l2",
+                "text": "  return hash.compare("
+              },
+              {
+                "id": "verify_l3",
+                "text": "    data.password, user.passwordHash"
+              },
+              {
+                "id": "verify_l4",
+                "text": "  );"
+              },
+              {
+                "id": "verify_l5",
+                "text": "}"
+              }
+            ],
+            "file": "src/auth/validators.ts",
+            "language": "typescript"
+          },
+          {
+            "id": "token",
+            "name": "createToken",
+            "description": "为认证通过的用户签发凭证",
+            "tags": [
+              "认证",
+              "返回"
+            ],
+            "note": "只把必要的用户标识放入载荷，并设置过期时间。",
+            "color": "#80cbbd",
+            "positions": {
+              "logic": {
+                "x": 830,
+                "y": 340
+              },
+              "code": {
+                "x": 1060,
+                "y": 480
+              }
+            },
+            "code": [
+              {
+                "id": "token_l1",
+                "text": "function createToken(user) {"
+              },
+              {
+                "id": "token_l2",
+                "text": "  return jwt.sign("
+              },
+              {
+                "id": "token_l3",
+                "text": "    { sub: user.id }, secret,"
+              },
+              {
+                "id": "token_l4",
+                "text": "    { expiresIn: '2h' }"
+              },
+              {
+                "id": "token_l5",
+                "text": "  );"
+              },
+              {
+                "id": "token_l6",
+                "text": "}"
+              }
+            ],
+            "file": "src/auth/token.ts",
+            "language": "typescript"
+          }
+        ],
+        "edges": [
+          {
+            "id": "call1",
+            "type": "call",
+            "from": "login",
+            "to": "validate",
+            "fromLine": "login_l2",
+            "toLine": null,
+            "label": "01 · 校验输入",
+            "params": "input",
+            "condition": "",
+            "note": "检查必填字段和输入格式。"
+          },
+          {
+            "id": "ret1",
+            "type": "return",
+            "callId": "call1",
+            "from": "validate",
+            "to": "login",
+            "fromLine": "validate_l5",
+            "toLine": "login_l2",
+            "label": "data",
+            "params": "经过校验的表单数据",
+            "condition": "",
+            "note": ""
+          },
+          {
+            "id": "call2",
+            "type": "call",
+            "from": "login",
+            "to": "find",
+            "fromLine": "login_l3",
+            "toLine": null,
+            "label": "02 · 查询用户",
+            "params": "data.email",
+            "condition": "校验通过",
+            "note": ""
+          },
+          {
+            "id": "call3",
+            "type": "call",
+            "from": "login",
+            "to": "verify",
+            "fromLine": "login_l4",
+            "toLine": null,
+            "label": "03 · 验证密码",
+            "params": "data, user",
+            "condition": "用户存在",
+            "note": ""
+          },
+          {
+            "id": "call4",
+            "type": "call",
+            "from": "login",
+            "to": "token",
+            "fromLine": "login_l6",
+            "toLine": null,
+            "label": "04 · 签发凭证",
+            "params": "user",
+            "condition": "ok === true",
+            "note": ""
+          },
+          {
+            "id": "ret4",
+            "type": "return",
+            "callId": "call4",
+            "from": "token",
+            "to": "login",
+            "fromLine": "token_l2",
+            "toLine": "login_l6",
+            "label": "token",
+            "params": "登录凭证",
+            "condition": "",
+            "note": ""
+          }
+        ],
+        "groups": [
+          {
+            "id": "zone-check",
+            "name": "身份校验",
+            "note": "检查输入格式，并验证用户身份。",
+            "color": "#8aaef0",
+            "members": [
+              "validate",
+              "verify"
+            ],
+            "positions": {
+              "logic": {
+                "x": 400,
+                "y": 40
+              },
+              "code": {
+                "x": 510,
+                "y": 20
+              }
+            }
+          },
+          {
+            "id": "zone-data",
+            "name": "数据与凭证",
+            "note": "查找用户记录，生成登录凭证。",
+            "color": "#80cbbd",
+            "members": [
+              "find",
+              "token"
+            ],
+            "positions": {
+              "logic": {
+                "x": 400,
+                "y": 290
+              },
+              "code": {
+                "x": 510,
+                "y": 430
+              }
+            }
+          }
+        ]
+      },
+      "updatedAt": 1792751259357
+    }
+  ],
+  "trash": []
+}

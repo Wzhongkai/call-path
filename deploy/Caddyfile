@@ -1,0 +1,5 @@
+# Replace callpath.example.com with your domain and point its DNS to the server.
+callpath.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8080
+}
