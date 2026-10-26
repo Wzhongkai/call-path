@@ -441,7 +441,7 @@ $('viewport').addEventListener('pointerdown',e=>{
   if(e.button!==0||e.target.closest('.canvas-tools,.zoom-controls,.connection-hint,.filter-indicator,.canvas-empty'))return;
   const n=e.target.closest('[data-node]');
   const group=e.target.closest('[data-group]');
-  const touchPan=e.pointerType==='touch'&&tool==='select'&&!pending&&!e.target.closest('button')&&((n&&(readOnly||!e.target.closest('.node-header')))||(group&&readOnly)||e.target.closest('[data-edge]'));
+  const touchPan=e.pointerType==='touch'&&tool==='select'&&!pending&&!e.target.closest('button')&&((n&&(readOnly||!e.target.closest('.node-header')))||(group&&(readOnly||!e.target.closest('.group-header')))||e.target.closest('[data-edge]'));
   if(touchPan){drag={type:'pan',startX:e.clientX,startY:e.clientY,original:{x:camera().x,y:camera().y},moved:false};}
   else if(n){if(readOnly||e.ctrlKey||e.metaKey||e.shiftKey||tool!=='select'||pending||!e.target.closest('.node-header')||e.target.closest('[data-edit-node]'))return;const model=nodeBy(n.dataset.node);drag={type:'node',id:model.id,startX:e.clientX,startY:e.clientY,original:{...model.positions[mode]},before:clone(doc),moved:false};}
   else if(group){if(readOnly||!e.target.closest('.group-header')||e.target.closest('[data-edit-group]'))return;const g=groupBy(group.dataset.group);drag={type:'group',id:g.id,startX:e.clientX,startY:e.clientY,original:clone(g.positions[mode]),originalMembers:g.members.map(id=>({id,position:{...nodeBy(id).positions[mode]}})),before:clone(doc),moved:false};}
