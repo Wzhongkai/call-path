@@ -1,0 +1,100 @@
+/* Keep desktop graph geometry intact; adapt the surrounding workspace. */
+.mobile-only,.sidebar-backdrop{display:none}
+@media(max-width:900px){
+  html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+  .app,.app.sidebar-collapsed{height:100dvh;min-height:0;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+  .mobile-only{display:inline-flex}
+  .topbar{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;padding:8px 12px;min-width:0}
+  #mobile-files{grid-column:1;grid-row:1;min-height:40px;padding:8px 10px}
+  .topbar .brand{display:none}
+  .project-crumb{grid-column:2;grid-row:1;margin:0;gap:6px;min-width:0}
+  .project-crumb #projects-btn{min-height:40px;padding:8px;font-size:12px}
+  .project-crumb #project-title{width:100%;min-width:0;font-size:16px;flex:1}
+  .project-crumb .slash,.project-crumb .local-badge{display:none}
+  .top-actions{grid-column:1/-1;margin:0;gap:8px;overflow-x:auto;min-width:0;padding-bottom:2px;scrollbar-width:none}
+  .top-actions .button{font-size:12px;min-height:38px;padding:8px 12px;flex-shrink:0}
+  .top-actions .button span{font-size:14px}
+  .top-actions #save-status{display:flex;font-size:10px;max-width:110px;min-width:60px;flex-shrink:0;order:1}
+  .top-actions #help-btn{width:36px;height:36px;flex-shrink:0}
+  .main{grid-column:1;grid-row:2;overflow:hidden}
+  .canvas-topbar{height:auto;min-height:104px;padding:8px 10px;align-items:stretch;flex-direction:column;gap:8px}
+  .mode-switch{align-self:flex-start;flex-shrink:0}
+  .mode-switch button{min-height:36px;font-size:12px;padding:7px 14px}
+  .canvas-actions{gap:6px;overflow-x:auto;min-width:0;scrollbar-width:none;align-items:center}
+  .canvas-actions>*{flex-shrink:0}
+  .canvas-actions .button,#comments-btn{font-size:12px;padding:8px 10px;min-height:38px}
+  .canvas-actions .icon-btn{display:inline-flex;width:38px;height:38px}
+  .canvas-actions .vertical-divider{display:none}
+  .canvas-actions #edit-selection{display:inline-flex}
+  #add-kind-btn{padding:8px 12px;margin:0}
+  .add-kind-menu{top:100%;right:10px}
+  .sidebar,.sidebar-collapsed .sidebar{display:flex;position:fixed;inset:0 auto 0 0;width:min(320px,88vw);height:100dvh;padding:calc(54px + env(safe-area-inset-top)) 16px calc(12px + env(safe-area-inset-bottom));z-index:60;transform:translateX(-105%);visibility:hidden;transition:transform .2s,visibility .2s;overflow:auto;box-shadow:12px 0 50px #0006}
+  .sidebar-collapsed .sidebar>*:not(.sidebar-controls){display:revert}
+  .sidebar .project-heading{display:flex;flex-shrink:0}
+  .sidebar .search-box,.sidebar .section-title,.sidebar .tag-list,.sidebar .sidebar-bottom{display:flex;flex-shrink:0}
+  .sidebar .function-list{display:block;min-height:140px;flex:1;overflow:auto}
+  .sidebar .sidebar-controls{height:0}
+  .sidebar .sidebar-controls .icon-btn{left:auto;right:12px;top:calc(8px + env(safe-area-inset-top));width:40px;height:40px;background:#20344d}
+  .sidebar .tree-file .function-item,.sidebar .tree-directory>summary,.sidebar .tree-file>summary{min-height:42px;font-size:12px}
+  .sidebar .search-box input{font-size:16px}
+  .sidebar .tag-filter{min-height:38px;font-size:12px}
+  .sidebar .sidebar-divider{margin:14px 4px}
+  .sidebar .sidebar-bottom{margin-top:16px}
+  .sidebar .sidebar-bottom .text-btn{min-height:40px;font-size:12px}
+  .sidebar-backdrop:not([hidden]){display:block;position:fixed;inset:0;background:#050d1bb8;z-index:59;touch-action:none}
+  .mobile-sidebar-open .sidebar{visibility:visible;transform:translateX(0)}
+  .canvas-tools{left:8px;right:8px;bottom:calc(10px + env(safe-area-inset-bottom));transform:none;max-width:calc(100% - 16px);overflow-x:auto;gap:2px;padding:4px;scrollbar-width:none;justify-content:space-between}
+  .canvas-tools button,.canvas-tools #click-connect-btn{min-height:40px;height:40px;padding:0 9px;font-size:11px;gap:4px;flex-shrink:0}
+  .canvas-tools .vertical-divider{margin:0 2px;flex-shrink:0}
+  .canvas-legend{display:none}
+  .zoom-controls{bottom:calc(70px + env(safe-area-inset-bottom));right:10px}
+  .zoom-controls button{min-height:38px;min-width:38px;font-size:12px}
+  .statusbar{height:auto;min-height:28px;padding:5px 10px;font-size:9px}
+  .statusbar>div{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .statusbar .canvas-instructions{display:none}
+  .filter-indicator{top:10px;right:10px;max-width:calc(100% - 20px)}
+  .connection-hint{top:8px;max-width:calc(100% - 20px);white-space:normal;font-size:12px}
+  .node-menu{min-width:32px;min-height:36px}
+  .node-foot .note-btn{min-height:30px}
+  .code-line .line-port{opacity:1}
+  .code-line{font-size:12px}
+  .code-line .line-number{font-size:11px}
+  .node-title{font-size:14px}
+  dialog,dialog.inspector,#account-dialog,#projects-dialog,#share-dialog{max-width:100vw;max-height:100dvh;width:100%;border-radius:0;padding:16px;overscroll-behavior:contain}
+  dialog.inspector{inset:0;height:100dvh;margin:0;padding:env(safe-area-inset-top) 16px 0;max-height:100dvh}
+  .inspector .inspector-title{margin:0 -16px;padding:0 16px;min-height:54px;height:auto;gap:8px}
+  .inspector-title>.icon-btn{min-width:40px;min-height:44px}
+  .editor-body{overflow:auto;min-width:0;padding-right:0}
+  .inspector-form,#edge-form,#group-form{display:block;padding-top:16px}
+  #node-form>.code-field{position:relative;top:auto;height:clamp(340px,65dvh,650px);min-height:0;grid-row:auto}
+  .inspector-form .field input,.inspector-form .field select,.inspector-form .field textarea,.coordinate-inputs input,.account-form input,.new-project-form input,.project-card-title input,.share-link-label input{font-size:16px}
+  .code-field>.field-label{flex-wrap:wrap;gap:8px;min-height:44px}
+  .inspector-form .field select.language-select{width:140px;font-size:14px;margin-left:auto;min-height:36px}
+  .inspector-form .field select.indent-select{width:100px;font-size:14px;min-height:36px}
+  .cm-host .cm-editor{font-size:16px!important}
+  .editor-footer{padding:10px 0 calc(10px + env(safe-area-inset-bottom));gap:10px}
+  .editor-footer>span{display:none}
+  .editor-footer>.button{flex:1;min-height:44px;font-size:14px}
+  .inner-marker{grid-template-columns:minmax(0,1fr) 70px 28px 28px}
+  .inspector-form .inner-marker input{font-size:16px}
+  .new-project-form{flex-wrap:wrap}
+  .new-project-form input{flex-basis:180px}
+  .project-list,.help-grid{grid-template-columns:1fr}
+  .help-footer{flex-direction:column;align-items:stretch}
+  .dialog-heading .icon-btn{width:40px;height:40px}
+  .toast{bottom:calc(80px + env(safe-area-inset-bottom));font-size:13px}
+}
+@media(max-width:900px) and (prefers-reduced-motion:reduce){.sidebar{transition:none}}
+@media(max-width:900px) and (max-height:500px){
+  .canvas-topbar{flex-direction:row;min-height:56px;align-items:center}
+  .canvas-actions{flex:1}
+  .mode-switch button{padding:7px 8px}
+  .sidebar{padding-top:48px}
+  .sidebar .project-heading,.sidebar .sidebar-divider{display:none}
+  .sidebar .search-box{margin-bottom:10px}
+}
+@media(min-width:600px) and (max-width:900px) and (max-height:500px){
+  .topbar{grid-template-columns:auto minmax(150px,1fr) minmax(200px,auto)}
+  .top-actions{grid-column:3;grid-row:1;max-width:340px}
+  .top-actions #save-status{display:none}
+}

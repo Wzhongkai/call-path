@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
   <meta name="theme-color" content="#0c1220" />
   <meta name="description" content="在逻辑与代码之间，理清每一次函数调用。支持行级连线、参数、返回值、备注和标签筛选。" />
   <title>Callpath · 函数调用画布</title>
@@ -10,15 +10,18 @@
   <link rel="stylesheet" href="./styles.css" />
   <link rel="stylesheet" href="./editor.css" />
   <link rel="stylesheet" href="./theme.css" />
+  <link rel="stylesheet" href="./mobile.css" />
 </head>
 <body>
   <div class="app">
     <header class="topbar">
+      <button id="mobile-files" class="button secondary mobile-only" aria-label="打开文件与标签" aria-controls="file-sidebar" aria-expanded="false">☰ 文件</button>
       <a class="brand" href="./" aria-label="Callpath 首页"><span class="brand-mark">⑂</span>callpath<span class="demo-badge">DEMO</span></a>
       <div class="project-crumb"><button id="projects-btn" class="button secondary" title="新建、切换和管理项目">▱ 项目 ▾</button><span class="slash">/</span><input id="project-title" aria-label="项目名称" maxlength="80" /><span class="local-badge">本地</span></div>
       <div class="top-actions"><span id="save-status"><i></i> 已保存到本机</span><button id="account-btn" class="button secondary">账号</button><button id="help-btn" class="icon-btn" title="使用指南" aria-label="使用指南">?</button><button id="share-btn" class="button secondary" hidden>分享项目</button><button id="export-btn" class="button secondary"><span>↗</span> 导出项目</button></div>
     </header>
-    <aside class="sidebar">
+    <button id="sidebar-backdrop" class="sidebar-backdrop" aria-label="关闭文件与标签" tabindex="-1" hidden></button>
+    <aside id="file-sidebar" class="sidebar" aria-label="文件与标签">
       <div class="sidebar-controls"><button id="toggle-sidebar" class="icon-btn" title="收起文件树" aria-label="收起或展开文件树" aria-expanded="true">‹</button></div>
       <div class="project-heading"><div class="project-icon">▱</div><div><strong id="sidebar-project-name">项目文件</strong><small id="sidebar-project-count"></small></div></div>
       <label class="search-box"><span>⌕</span><input id="search" placeholder="搜索函数、文件或备注…" aria-label="搜索函数、文件或备注"/><kbd>/</kbd></label>
