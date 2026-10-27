@@ -1,5 +1,5 @@
 import {COLORS,uid,clone,createDemo,reconcileLines,repairAnchors,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition} from './model.js';
-import {routeBetween,returnAlong,pathFor} from './geometry.js';
+import {routeBlocks,returnAlong,pathFor} from './geometry.js';
 import {LANGUAGES,highlightCode} from './highlight.js';
 import {createWorkspace,validateWorkspace,addProject,renameProject,softDeleteProject,restoreProject,buildFileTree} from './workspace.js';
 import {createCodeEditor,codePreviewLines,compactPreviewLines} from './vendor/editor.js';
@@ -163,15 +163,8 @@ function edgeGeometry(e){
   const s=fromEntry||anchor(a,e.fromLine,forward),t=exposed||anchor(b,e.toLine,!forward);
   const parallel=doc.edges.filter(v=>v.from===e.from&&v.to===e.to&&v.type===e.type),index=parallel.findIndex(v=>v.id===e.id),offset=index*22;
   if(a.id===b.id&&!exposed){const x=ar.x+ar.w+65+offset,segments=[{from:{x:ar.x+ar.w,y:s.y},c1:{x,y:s.y-70},c2:{x:x+30,y:s.y+110},to:{x:ar.x+ar.w,y:s.y+80}}];return {d:pathFor(segments),segments,dir:1};}
-  const gap=Math.abs(t.x-s.x),dir=forward?1:-1;
-  let lane=null;
-  if(gap>420||e.type==='return'){
-    const bottom=e.type==='return'||br.y>ar.y+50;
-    lane=bottom?Math.max(ar.y+ar.h,br.y+br.h)+40+offset:Math.min(ar.y,br.y)-78-offset;
-  }
-  if(exposed&&s.x>=t.x)lane=Math.max(ar.y+ar.h,br.y+br.h)+40+offset;
-  if(fromEntry&&t.x>s.x)lane=Math.max(ar.y+ar.h,br.y+br.h)+40+offset;
-  const segments=routeBetween(s,t,{dir:fromEntry?-1:dir,endDir:exposed?1:dir,lane,offset});return {d:pathFor(segments),segments,dir};
+  const dir=forward?1:-1;
+  const segments=routeBlocks(s,t,{source:ar,target:br,dir:fromEntry?-1:dir,endDir:exposed?1:dir,offset});return {d:pathFor(segments),segments,dir};
 }
 function drawEdges(){
   const matches=visible();

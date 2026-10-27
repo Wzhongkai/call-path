@@ -6,6 +6,17 @@ export function routeBetween(s,t,{dir=1,endDir=dir,lane=null,offset=0}={}){
   const curve=Math.max(70,Math.abs(t.x-s.x)*.5)+offset;
   return [cubic(s,pt(s.x+dir*curve,s.y+offset),pt(t.x-endDir*curve,t.y+offset),t)];
 }
+// Horizontal distance alone never requires a detour around a code block.
+export function routeBlocks(s,t,{source,target,dir=1,endDir=dir,offset=0}={}){
+  let lane=null;
+  if(dir*(t.x-s.x)<=0||endDir*(t.x-s.x)<=0){
+    const above=Math.min(source.y,target.y)-40-offset;
+    const below=Math.max(source.y+source.h,target.y+target.h)+40+offset;
+    const cost=y=>Math.abs(s.y-y)+Math.abs(t.y-y);
+    lane=cost(above)<=cost(below)?above:below;
+  }
+  return routeBetween(s,t,{dir,endDir,lane,offset});
+}
 export function returnAlong(segments,{offset=14,start=null,end=null,dir=1}={}){
   const shift=p=>pt(p.x,p.y+offset);
   const reversed=segments.toReversed().map(s=>cubic(shift(s.to),shift(s.c2),shift(s.c1),shift(s.from)));
