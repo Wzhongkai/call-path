@@ -159,11 +159,16 @@ function edgeGeometry(e){
   if(e.type==='return'){
     const call=e.callId?edgeBy(e.callId):doc.edges.find(c=>c.type==='call'&&c.from===e.to&&c.to===e.from);
     if(call?.type==='call'){
-      const base=edgeGeometry(call),forward=base.dir>0,dir=base.dir;
+      const base=edgeGeometry(call),dir=base.dir;
       const peers=doc.edges.filter(r=>r.type==='return'&&(r.callId===call.id||(!r.callId&&r.from===e.from&&r.to===e.to))),offset=14+Math.max(0,peers.findIndex(r=>r.id===e.id))*12;
-      const start=mode==='code'?exposedAnchor(a,e.fromEntry)||anchor(a,e.fromLine,!forward):null,end=mode==='code'?exposedAnchor(b,e.toEntry)||anchor(b,e.toLine,forward):null;
-      if(end)end.y+=5;
-      const segments=returnAlong(base.segments,{offset,start,end,dir});return {d:pathFor(segments),segments,dir};
+      if(mode==='code'){
+        const fromEntry=exposedAnchor(a,e.fromEntry),toEntry=exposedAnchor(b,e.toEntry);
+        const startDir=fromEntry?-1:-(base.endDir??dir),endDir=toEntry?1:-(base.startDir??dir);
+        const start=fromEntry||anchor(a,e.fromLine,startDir>0),end=toEntry||anchor(b,e.toLine,endDir<0);
+        const segments=routeBlocks(start,end,{source:measureNode(a),target:measureNode(b),dir:startDir,endDir,offset});
+        return {d:pathFor(segments),segments,dir,startDir,endDir};
+      }
+      const segments=returnAlong(base.segments,{offset});return {d:pathFor(segments),segments,dir};
     }
   }
   const exposed=exposedAnchor(b,e.toEntry),fromEntry=exposedAnchor(a,e.fromEntry);
@@ -172,7 +177,8 @@ function edgeGeometry(e){
   const parallel=doc.edges.filter(v=>v.from===e.from&&v.to===e.to&&v.type===e.type),index=parallel.findIndex(v=>v.id===e.id),offset=index*22;
   if(a.id===b.id&&!exposed){const x=ar.x+ar.w+65+offset,segments=[{from:{x:ar.x+ar.w,y:s.y},c1:{x,y:s.y-70},c2:{x:x+30,y:s.y+110},to:{x:ar.x+ar.w,y:s.y+80}}];return {d:pathFor(segments),segments,dir:1};}
   const dir=forward?1:-1;
-  const segments=routeBlocks(s,t,{source:ar,target:br,dir:fromEntry?-1:dir,endDir:exposed?1:dir,offset});return {d:pathFor(segments),segments,dir};
+  const startDir=fromEntry?-1:dir,endDir=exposed?1:dir;
+  const segments=routeBlocks(s,t,{source:ar,target:br,dir:startDir,endDir,offset});return {d:pathFor(segments),segments,dir,startDir,endDir};
 }
 function drawEdges(){
   const matches=visible();
