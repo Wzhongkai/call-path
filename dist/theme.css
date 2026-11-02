@@ -1,4 +1,8 @@
 /* Shared colors for the canvas, controls and modal editor. */
+.node-header,.group-header{cursor:default}
+.viewport.moving .node-header,.viewport.moving .group-header{cursor:move}
+.viewport.moving .port,.viewport.moving .line-port,.viewport.moving .entry-port{pointer-events:none}
+.readonly-view [data-tool=move]{display:none!important}
 :root{
   --bg:#0c1220;--panel:#131c2c;--panel2:#1a2638;--border:#29384e;
   --text:#e5edf8;--muted:#94a5bc;--accent:#65b9ff;--green:var(--accent);
