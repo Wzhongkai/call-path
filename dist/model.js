@@ -2,13 +2,18 @@ import {LANGUAGES} from './highlight.js';
 export const COLORS = ['#71c9ef','#8aaef0','#b5a1e7','#d9b581','#df9eac','#80cbbd'];
 export const uid = (prefix = 'id') => `${prefix}_${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)}`;
 export const clone = value => JSON.parse(JSON.stringify(value));
-// Keep the v1 JSON shape for existing clients, with one layout in both slots.
-export function setBlockPosition(block,position){
-  for(const mode of ['logic','code'])Object.assign(block.positions[mode],{x:position.x,y:position.y});
+// Preserve position references used by keyboard animation in either layout mode.
+export function setBlockPosition(block,position,{mode='code',sync=true}={}){
+  for(const slot of sync?['logic','code']:[mode])Object.assign(block.positions[slot],{x:position.x,y:position.y});
 }
-export function unifyLayout(doc,preferredMode='logic'){
+export function unifyLayout(doc,preferredMode='code'){
   for(const block of [...doc.nodes,...(doc.groups||[])])setBlockPosition(block,block.positions[preferredMode==='code'?'code':'logic']);
   return doc;
+}
+export function setLayoutSync(doc,enabled){
+  if(typeof enabled!=='boolean')throw Error('布局同步设置必须为布尔值');
+  doc.layoutSync=enabled;
+  return enabled?unifyLayout(doc,'code'):doc;
 }
 const lines = (id, code) => code.split('\n').map((text, i) => ({id:`${id}_l${i+1}`,text}));
 export function createDemo() {
@@ -33,7 +38,7 @@ export function createDemo() {
     {id:'zone-check',name:'身份校验',note:'检查输入格式，并验证用户身份。',color:COLORS[1],members:['validate','verify'],positions:{logic:{x:400,y:40},code:{x:510,y:20}}},
     {id:'zone-data',name:'数据与凭证',note:'查找用户记录，生成登录凭证。',color:COLORS[5],members:['find','token'],positions:{logic:{x:400,y:290},code:{x:510,y:430}}}
   ];
-  return unifyLayout({schemaVersion:1,title:'用户登录 · 调用分析',nodes,edges,groups},'code');
+  return unifyLayout({schemaVersion:1,layoutSync:true,title:'用户登录 · 调用分析',nodes,edges,groups},'code');
 }
 // LCS retains identities of unchanged rows when code is inserted or removed.
 // Edited rows within the same gap keep their old identity where possible.
@@ -84,10 +89,11 @@ export function assignNodeTag(doc,nodeId,tag){
   if(node.tags.length>=20)throw Error('一个函数最多支持 20 个标签');
   node.tags.push(tag);return true;
 }
-export function validateDocument(value,preferredMode='logic'){
+export function validateDocument(value){
   const fail=()=>{throw Error('不是有效的 Callpath 项目文件：请检查数据结构、函数及连线引用。');};
   if(!value||value.schemaVersion!==1||!Array.isArray(value.nodes)||!Array.isArray(value.edges)||value.nodes.length>200||value.edges.length>1000)fail();
   const doc=clone(value);if(typeof doc.title!=='string'||doc.title.length>80)fail();
+  if(doc.layoutSync!==undefined&&typeof doc.layoutSync!=='boolean')fail();
   const ids=new Set();
   for(const n of doc.nodes){
     if(typeof n.id!=='string'||!n.id||n.id.length>100||ids.has(n.id)||typeof n.name!=='string'||!n.name.trim()||n.name.length>100||!Array.isArray(n.tags)||n.tags.length>20||n.tags.some(t=>typeof t!=='string'||t.length>40)||!Array.isArray(n.code)||n.code.length<1||n.code.length>400||!/^#[\da-f]{6}$/i.test(n.color))fail();
@@ -114,5 +120,5 @@ export function validateDocument(value,preferredMode='logic'){
     groupIds.add(g.id);for(const id of g.members){if(members.has(id))fail();members.add(id);}
     for(const mode of ['logic','code'])for(const axis of ['x','y'])if(!Number.isFinite(g.positions?.[mode]?.[axis])||Math.abs(g.positions[mode][axis])>100000)fail();
   }
-  return unifyLayout(doc,preferredMode);
+  return setLayoutSync(doc,doc.layoutSync??true);
 }

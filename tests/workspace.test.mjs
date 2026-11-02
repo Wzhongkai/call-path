@@ -7,14 +7,17 @@ test('project deletion is recoverable and deleting the final live project create
 test('directory trees normalize path separators and group functions under files',()=>{const nodes=[{id:'a',file:'src\\auth\\login.c'},{id:'b',file:'src/auth/login.c'},{id:'c',file:'src/data/db.rs'},{id:'d',file:''}];const tree=buildFileTree(nodes),src=tree.find(t=>t.name==='src');assert.equal(src.children.find(t=>t.name==='auth').children[0].nodes.length,2);assert.equal(tree.find(t=>t.name==='未指定文件').nodes[0].id,'d');});
 test('invalid project identities and names are rejected',()=>{const ws=createWorkspace(createDemo());assert.throws(()=>addProject(ws,''));assert.throws(()=>renameProject(ws,ws.activeId,' '.repeat(4)));ws.projects.push({...ws.projects[0]});assert.throws(()=>validateWorkspace(ws));});
 
-test('existing and deleted projects retain their last visible layout when migrating independent coordinates',()=>{
+test('legacy projects default to code layout while independently arranged trash retains both layouts',()=>{
   const ws=createWorkspace(createDemo()),first=ws.projects[0],second=addProject(ws,'第二个',createDemo());
   for(const project of ws.projects){for(const block of [...project.document.nodes,...project.document.groups])block.positions.logic={x:-120,y:80};}
   first.view={mode:'code',cameras:{logic:{x:1,y:2,z:.8},code:{x:20,y:30,z:1}}};
   second.view={...first.view,mode:'logic'};softDeleteProject(ws,second.id);
+  delete first.document.layoutSync;second.document.layoutSync=false;
   const migrated=validateWorkspace(ws);
   assert.deepEqual(migrated.projects[0].document.nodes[0].positions.logic,first.document.nodes[0].positions.code);
-  assert.deepEqual(migrated.trash[0].document.nodes[0].positions.code,{x:-120,y:80});
+  assert.deepEqual(migrated.trash[0].document.nodes[0].positions.logic,{x:-120,y:80});
+  assert.deepEqual(migrated.trash[0].document.nodes[0].positions.code,second.document.nodes[0].positions.code);
+  assert.equal(migrated.trash[0].document.layoutSync,false);
   assert.deepEqual(migrated.projects[0].view,first.view);assert.deepEqual(validateWorkspace(migrated),migrated);
   assert.deepEqual(first.document.nodes[0].positions.logic,{x:-120,y:80});
 });

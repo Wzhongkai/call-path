@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createDemo,reconcileLines,repairAnchors,traceNodes,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition,clone} from '../dist/model.js';
+import {createDemo,reconcileLines,repairAnchors,traceNodes,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition,setLayoutSync,clone} from '../dist/model.js';
 test('demo and JSON roundtrip retain valid line anchors, linked returns and groups',()=>{const doc=createDemo();assert.deepEqual(validateDocument(JSON.parse(JSON.stringify(doc))),doc);});
 test('inserting before a call retains its original line identity',()=>{const doc=createDemo(),n=doc.nodes[0],edge=doc.edges[0],id=edge.fromLine;n.code=reconcileLines(n.code,'// extra header\n'+n.code.map(l=>l.text).join('\n'));assert.equal(n.code[2].id,id);assert.equal(repairAnchors(doc),0);});
 test('removing a connected line detaches safely to function level',()=>{const doc=createDemo(),n=doc.nodes[0],id=doc.edges[0].fromLine;n.code=reconcileLines(n.code,n.code.filter(l=>l.id!==id).map(l=>l.text).join('\n'));assert.ok(repairAnchors(doc)>0);assert.equal(doc.edges[0].fromLine,null);assert.doesNotThrow(()=>validateDocument(doc));});
@@ -29,15 +29,40 @@ test('inner function entry stores only name and stable line reference and surviv
 
 test('inner entry validation rejects missing lines and duplicate interface rows',()=>{const doc=createDemo(),node=doc.nodes[0];node.innerFunctions=[{id:'inner1',name:'inner',lineId:'missing'}];assert.throws(()=>validateDocument(doc));node.innerFunctions=[{id:'inner1',name:'inner',lineId:node.code[1].id},{id:'inner2',name:'another',lineId:node.code[1].id}];assert.throws(()=>validateDocument(doc));});
 
-test('legacy layouts normalize using the selected view without changing the source or code anchors',()=>{
+test('legacy synchronized layouts use code positions without changing the source or code anchors',()=>{
   const legacy=createDemo();for(const block of [...legacy.nodes,...legacy.groups])block.positions.logic={x:-100,y:20};
+  delete legacy.layoutSync;
   const source=clone(legacy),code=validateDocument(legacy,'code'),logic=validateDocument(legacy);
   for(const [index,block] of [...code.nodes,...code.groups].entries()){
     assert.deepEqual(block.positions.logic,block.positions.code);
     assert.deepEqual(block.positions.code,[...source.nodes,...source.groups][index].positions.code);
   }
-  for(const block of [...logic.nodes,...logic.groups])assert.deepEqual(block.positions.code,{x:-100,y:20});
+  assert.deepEqual(logic,code);assert.equal(code.layoutSync,true);
   assert.deepEqual(legacy,source);assert.deepEqual(code.edges,legacy.edges);assert.deepEqual(code.nodes[0].code,legacy.nodes[0].code);
+});
+
+test('independent layouts retain node, partition and keyboard positions through JSON and history roundtrips',()=>{
+  const doc=createDemo();setLayoutSync(doc,false);
+  const before=clone(doc),node=doc.nodes[0],codeRef=node.positions.code,logicRef=node.positions.logic;
+  setBlockPosition(node,{x:1240,y:-80},{mode:'logic',sync:false});
+  assert.deepEqual(codeRef,before.nodes[0].positions.code);
+  codeRef.x+=40;setBlockPosition(node,codeRef,{mode:'code',sync:false});
+  assert.deepEqual(logicRef,{x:1240,y:-80});assert.equal(node.positions.code,codeRef);
+  const group=doc.groups[0],groupCode=clone(group.positions.code);
+  setBlockPosition(group,{x:-50,y:700},{mode:'logic',sync:false});
+  for(const id of group.members){const member=doc.nodes.find(n=>n.id===id);setBlockPosition(member,{x:member.positions.logic.x+20,y:member.positions.logic.y+60},{mode:'logic',sync:false});}
+  assert.deepEqual(group.positions.code,groupCode);
+  const saved=validateDocument(JSON.parse(JSON.stringify(doc)));
+  assert.deepEqual(saved,doc);assert.equal(saved.layoutSync,false);
+  const independent=clone(doc);setLayoutSync(doc,true);
+  for(const block of [...doc.nodes,...doc.groups])assert.deepEqual(block.positions.logic,block.positions.code);
+  assert.deepEqual(doc.nodes[0].positions.code,independent.nodes[0].positions.code);
+  assert.deepEqual(validateDocument(independent),independent);
+  assert.deepEqual(doc.edges,independent.edges);assert.deepEqual(doc.nodes[0].code,independent.nodes[0].code);
+});
+
+test('layout synchronization accepts only boolean settings',()=>{
+  for(const value of [null,1,'false',{}]){const doc=createDemo();doc.layoutSync=value;assert.throws(()=>validateDocument(doc));assert.throws(()=>setLayoutSync(createDemo(),value));}
 });
 
 test('shared positions survive movement in either mode, mutable keyboard references and history roundtrips',()=>{

@@ -1,4 +1,4 @@
-import {COLORS,uid,clone,createDemo,reconcileLines,repairAnchors,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition} from './model.js';
+import {COLORS,uid,clone,createDemo,reconcileLines,repairAnchors,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition as assignBlockPosition,setLayoutSync} from './model.js';
 import {routeBlocks,returnAlong,pathFor} from './geometry.js';
 import {LANGUAGES,highlightCode} from './highlight.js';
 import {createWorkspace,validateWorkspace,addProject,renameProject,softDeleteProject,restoreProject,buildFileTree} from './workspace.js';
@@ -36,6 +36,8 @@ if(!account.remote)try{const raw=localStorage.getItem(STORAGE);const saved=JSON.
 let workspace=createWorkspace(doc),workspaceWritable=true;const closedTree=new Set();
 try{const raw=account.remote?(account.draft?.workspace||account.snapshot.workspace):JSON.parse(localStorage.getItem(WORKSPACE)||'null');if(raw){workspace=validateWorkspace(raw);const active=workspace.projects.find(p=>p.id===workspace.activeId);doc=active.document;if(active.view){mode=active.view.mode;cameras=clone(active.view.cameras);hadSavedView=true;}}}catch{storageFailed=true;workspaceWritable=false;}
 const camera=()=>cameras[mode];
+const layoutSynced=()=>doc.layoutSync!==false;
+const setBlockPosition=(block,position)=>assignBlockPosition(block,position,{mode,sync:layoutSynced()});
 const nodeBy=id=>doc.nodes.find(n=>n.id===id);
 const edgeBy=id=>doc.edges.find(e=>e.id===id);
 const groupBy=id=>(doc.groups||[]).find(g=>g.id===id);
@@ -93,6 +95,10 @@ function render(){
   sanitizeSelection();
   $('project-title').value=doc.title;
   document.title=`${doc.title} · Callpath`;
+  $('layout-sync-btn').textContent=layoutSynced()?'布局：相同':'布局：不同';
+  $('layout-sync-btn').setAttribute('aria-pressed',String(layoutSynced()));
+  $('layout-sync-btn').title=layoutSynced()?'两种模式共享位置；点击改为独立布局':'两种模式分别布局；点击以代码模式为准同步位置';
+  $('layout-sync-btn').disabled=readOnly;
   document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
   document.querySelectorAll('[data-tool]').forEach(b=>{b.classList.toggle('active',b.dataset.tool===tool);b.setAttribute('aria-pressed',String(b.dataset.tool===tool));});
   if(!isConnecting())pointConnect=false;$('click-connect-btn').classList.toggle('active',pointConnect);
@@ -222,7 +228,7 @@ function renderInspector(){
       ${labelField('功能说明','description',n.description,{placeholder:'一句话说明函数的职责'})}
       ${labelField('所属文件','file',n.file||'',{placeholder:'例如 src/auth/login.ts',hint:'相对项目路径'})}
       ${blockKind(n)==='function'?`<section class="field nested-functions"><div class="field-label">内嵌函数入口<button type="button" id="add-nested-function">＋ 添加</button></div><p>行号控制左侧接口，名称用于检索与跳转。</p><div id="embedded-list"></div><label class="nested-entry-option"><input type="checkbox" name="exposeEmbedded" ${n.exposeEmbedded!==false?'checked':''}/><span>在画布左侧显示入口</span></label></section>`:''}
-      <div class="field"><span class="field-label">左上角坐标<small>${canMoveBlocks()?'逻辑 / 代码模式共用 · px':'切换移动模式可调整'}</small></span><div class="coordinate-inputs"><label>X<input name="posX" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].x)}"/></label><label>Y<input name="posY" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].y)}"/></label></div></div>
+      <div class="field"><span class="field-label">左上角坐标<small>${canMoveBlocks()?(layoutSynced()?'逻辑 / 代码模式共用 · px':(mode==='code'?'仅代码模式 · px':'仅逻辑模式 · px')):'切换移动模式可调整'}</small></span><div class="coordinate-inputs"><label>X<input name="posX" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].x)}"/></label><label>Y<input name="posY" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].y)}"/></label></div></div>
       <label class="field"><span class="field-label">所属分区</span><select name="groupId"><option value="">不属于任何分区</option>${(doc.groups||[]).map(g=>`<option value="${esc(g.id)}" ${g.members.includes(n.id)?'selected':''}>${esc(g.name)}</option>`).join('')}</select></label>
       <label class="field"><span class="field-label">父函数 / 嵌套作用域<small>定义关系，不自动连调用线</small></span><select name="parentId"><option value="">文件级定义</option>${doc.nodes.filter(p=>blockKind(p)==='function'&&p.id!==n.id&&canParent(doc,n.id,p.id)).map(p=>`<option value="${esc(p.id)}" ${n.parentId===p.id?'selected':''}>${esc(scopePath(doc,p))}</option>`).join('')}</select></label>
       <div class="field"><span class="field-label">标记颜色</span><div class="color-options">${COLORS.map(c=>`<button type="button" class="color-dot ${n.color===c?'active':''}" style="--swatch:${c}" data-color="${c}" aria-label="选择颜色 ${c}"></button>`).join('')}</div></div>
@@ -327,7 +333,7 @@ function addGroup(){
   const g={id:uid('group'),name:'新分区',note:'',color:COLORS[(doc.groups||[]).length%COLORS.length],members,positions:{logic:{...pos},code:{...pos}}};
   commit(()=>{doc.groups||=[];for(const old of doc.groups)old.members=old.members.filter(id=>!members.includes(id));doc.groups.push(g);multi.clear();selected={type:'group',id:g.id};});openInspector();toast(members.length?`已将 ${members.length} 个函数圈入新分区`:'已创建分区，在弹窗勾选要加入的函数');
 }
-function setMode(next){if(mode===next)return;finishKeyMotion();cameras[next]={...camera()};mode=next;pending=null;if(tool!=='move')tool='select';render();if(mobileLayout.matches&&selected?.type==='node')centerNode(selected.id);save();}
+function setMode(next){if(mode===next)return;finishKeyMotion();if(layoutSynced())cameras[next]={...camera()};mode=next;pending=null;if(tool!=='move')tool='select';render();if(layoutSynced()&&mobileLayout.matches&&selected?.type==='node')centerNode(selected.id);save();}
 function download(content,type,extension){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=(doc.title.replace(/[<>:"/\\|?*]/g,'_')||'callpath')+'.'+extension;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function exportSvg(){
   if(!doc.nodes.length){toast('先添加一个函数再导出');return;}
@@ -342,6 +348,13 @@ function exportSvg(){
 
 // Application controls
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+$('layout-sync-btn').addEventListener('click',()=>{
+  if(readOnly)return;
+  finishKeyMotion();if(drag)endDrag({pointerId:drag.pointerId,type:'pointercancel'});
+  const enabled=!layoutSynced();
+  commit(()=>{setLayoutSync(doc,enabled);if(enabled)cameras.logic={...cameras.code};else cameras[mode==='logic'?'code':'logic']={...camera()};});
+  toast(enabled?'布局已设为相同，以代码模式的位置为准；可撤销':'布局已设为不同，两种模式可独立排版');
+});
 $('comments-btn').addEventListener('click',()=>{showComments=!showComments;try{localStorage.setItem('callpath.show-comments',String(showComments));}catch{}renderNodes();renderGroups();drawEdges();$('comments-btn').textContent=showComments?'隐藏注释':'显示注释';$('comments-btn').setAttribute('aria-pressed',String(showComments));$('comments-btn').classList.toggle('active',showComments);});
 document.querySelectorAll('[data-tool]').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.tool)));
 $('click-connect-btn').addEventListener('click',()=>{if(pointConnect){setTool('select');return;}setTool('call');pointConnect=true;$('click-connect-btn').classList.add('active');toast('点选连线：依次点击两个端点，可连续连接；Esc 退出');});

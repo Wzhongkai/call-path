@@ -18,3 +18,11 @@ test('a shared snapshot creates exactly one isolated project and normalizes the 
   assert.deepEqual(ws.projects[0].view,view);assert.ok(!JSON.stringify(ws).includes('owner-secret'));assert.ok(!JSON.stringify(ws).includes('private-id'));
   assert.throws(()=>sharedWorkspace({project:{document:{}},updatedAt:1}));assert.throws(()=>sharedWorkspace({project:{document},updatedAt:'bad'}));
 });
+
+test('a read-only snapshot preserves independent code and logic layouts and camera views',()=>{
+  const document=createDemo();document.layoutSync=false;
+  for(const block of [...document.nodes,...document.groups])block.positions.logic={x:-700,y:420};
+  const view={mode:'logic',cameras:{logic:{x:-500,y:10,z:.5},code:{x:120,y:30,z:1.3}}};
+  const ws=sharedWorkspace({project:{document,view},updatedAt:123456});
+  assert.deepEqual(ws.projects[0].document,document);assert.deepEqual(ws.projects[0].view,view);
+});

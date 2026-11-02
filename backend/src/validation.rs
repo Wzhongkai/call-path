@@ -41,6 +41,12 @@ fn document(value: &Value) -> Check {
     if value["schemaVersion"] != 1 || !text(&value["title"], 80, false) {
         return Err("项目格式错误");
     }
+    if value
+        .get("layoutSync")
+        .is_some_and(|sync| !sync.is_boolean())
+    {
+        return Err("布局同步设置无效");
+    }
     let nodes = array(&value["nodes"], 200)?;
     let edges = array(&value["edges"], 1000)?;
     let mut by_id = HashMap::new();

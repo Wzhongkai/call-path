@@ -1,6 +1,6 @@
 import {uid,clone,validateDocument} from './model.js';
 const titleOf=value=>{const title=String(value||'').trim();if(!title||title.length>80)throw Error('项目名称需要 1–80 个字符');return title;};
-export function emptyProject(title){return {schemaVersion:1,title:titleOf(title),nodes:[],edges:[],groups:[]};}
+export function emptyProject(title){return {schemaVersion:1,layoutSync:true,title:titleOf(title),nodes:[],edges:[],groups:[]};}
 export function createWorkspace(document){const id=uid('project');return {schemaVersion:1,activeId:id,projects:[{id,document:clone(document),updatedAt:Date.now()}],trash:[]};}
 export function validateWorkspace(value){
   if(!value||value.schemaVersion!==1||!Array.isArray(value.projects)||!value.projects.length||value.projects.length>100||!Array.isArray(value.trash))throw Error('工作空间格式不正确');

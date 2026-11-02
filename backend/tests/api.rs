@@ -83,6 +83,89 @@ fn workspace() -> Value {
 }
 
 #[tokio::test]
+async fn layout_sync_and_independent_positions_survive_workspace_and_share_roundtrips() {
+    let temp = TempDir::new().unwrap();
+    let cfg = config(&temp);
+    let app = router(open_state(cfg.clone()).await.unwrap());
+    let (cookie, _) = register(&app, "layoutuser").await;
+    let mut source = workspace();
+    let project = source["projects"][0]["id"].clone();
+    let document = &mut source["projects"][0]["document"];
+    document["nodes"][0]["positions"] = json!({
+        "logic": {"x": 123, "y": -456},
+        "code": {"x": -789, "y": 987}
+    });
+    let mut public = None;
+    // Missing is the legacy format. The server preserves it for clients to default to true.
+    for (index, sync) in [None, Some(false), Some(true)].into_iter().enumerate() {
+        if let Some(sync) = sync {
+            source["projects"][0]["document"]["layoutSync"] = json!(sync);
+        }
+        let (status, _, saved) = request(
+            &app,
+            "PUT",
+            "/api/workspace",
+            Some(&cookie),
+            Some(json!({"revision":index,"workspace":source})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        let reopened = router(open_state(cfg.clone()).await.unwrap());
+        let (status, _, loaded) =
+            request(&reopened, "GET", "/api/workspace", Some(&cookie), None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(loaded["workspace"], source);
+        let owned = public.as_ref().map(|token| format!("/api/shares/{token}"));
+        let (status, _, shared) = request(
+            &reopened,
+            if owned.is_some() { "PUT" } else { "POST" },
+            owned.as_deref().unwrap_or("/api/shares"),
+            Some(&cookie),
+            Some(json!({"projectId":project,"revision":index + 1})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{shared}");
+        let token = shared["share"]["token"].as_str().unwrap().to_owned();
+        let restarted = router(open_state(cfg.clone()).await.unwrap());
+        let (status, _, snapshot) = request(
+            &restarted,
+            "GET",
+            &format!("/api/shared/{token}"),
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            snapshot["project"]["document"],
+            source["projects"][0]["document"]
+        );
+        public = Some(token);
+    }
+    // Reject malformed flags without modifying the last valid workspace revision.
+    for invalid in [json!(null), json!("false"), json!(0), json!({})] {
+        source["projects"][0]["document"]["layoutSync"] = invalid;
+        let (status, _, error) = request(
+            &app,
+            "PUT",
+            "/api/workspace",
+            Some(&cookie),
+            Some(json!({"revision":3,"workspace":source})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    }
+    let loaded = request(&app, "GET", "/api/workspace", Some(&cookie), None)
+        .await
+        .2;
+    assert_eq!(loaded["revision"], 3);
+    assert_eq!(
+        loaded["workspace"]["projects"][0]["document"]["layoutSync"],
+        true
+    );
+}
+
+#[tokio::test]
 async fn project_shares_are_owned_read_only_snapshots_with_revocation() {
     let temp = TempDir::new().unwrap();
     let mut cfg = config(&temp);
