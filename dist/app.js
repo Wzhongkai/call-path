@@ -2,7 +2,7 @@ import {COLORS,uid,clone,createDemo,reconcileLines,repairAnchors,filterNodes,del
 import {routeBlocks,routeConnection,pathFor,separateBlocks,slideBlocks} from './geometry.js';
 import {LANGUAGES,highlightCode} from './highlight.js';
 import {createWorkspace,validateWorkspace,addProject,renameProject,softDeleteProject,restoreProject,buildFileTree} from './workspace.js';
-import {createCodeEditor,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines} from './vendor/editor.js';
+import {createCodeEditor,analyzeCodePreview,codePreviewLines,compactPreviewLines,canvasCodePreview} from './vendor/editor.js';
 import {emptyProject} from './workspace.js';
 import {connectAccount,mountAccount} from './account.js';
 import {dismissOnBackdrop} from './dialog.js';
@@ -26,7 +26,7 @@ let pointConnect=false,lastConnectionAt=-Infinity;
 const isConnecting=()=>tool==='call'||tool==='return'||Boolean(pending);
 const canMoveBlocks=()=>!readOnly&&tool==='move';
 let codeEditor=null,editorLines=null,innerDraft=[];
-let showComments=false;const previewCache=new WeakMap(),expandedFolds=new WeakMap();
+let showComments=false;const previewCache=new WeakMap(),expandedPreviews=new WeakSet(),collapsedFolds=new WeakMap();
 let canvasRects=new Map();
 try{showComments=localStorage.getItem('callpath.show-comments')==='true';}catch{}
 let treeDragUntil=0;
@@ -81,7 +81,7 @@ function functionTargets(node,lineId,name){
   const sameFile=candidates.filter(n=>n.file&&n.file===node.file);return (sameFile.length===1?sameFile:candidates).map(n=>n.id);
 }
 function syntax(text,node,lineId){const attrs=(name,ids)=>`data-function-name="${esc(name)}" data-jump-nodes="${esc(JSON.stringify(ids))}" title="${ids.length?'Ctrl + 单击定位 '+esc(name):'尚未创建 '+esc(name)+' 的定义块'}"`;return highlightCode(text,node.language||'javascript',name=>{const local=nestedEntries(node).filter(entry=>entry.name===name),matches=local.length?local.map(entry=>({node,entry})):doc.nodes.flatMap(owner=>nestedEntries(owner).filter(entry=>entry.name===name).map(entry=>({node:owner,entry})));if(matches.length===1)return attrs(name,[matches[0].node.id])+` data-jump-line="${esc(matches[0].entry.lineId)}"`;return attrs(name,functionTargets(node,lineId,name));},name=>{const candidates=doc.nodes.filter(n=>blockKind(n)!=='function'&&n.name===name),sameFile=candidates.filter(n=>n.file&&n.file===node.file),ids=(sameFile.length===1?sameFile:candidates).map(n=>n.id);return ids.length?attrs(name,ids):'';});}
-function canvasLines(n){
+function canvasPreview(n){
   const anchorIds=new Set(nestedEntries(n).map(entry=>entry.lineId));
   for(const edge of doc.edges){if(edge.from===n.id&&edge.fromLine)anchorIds.add(edge.fromLine);if(edge.to===n.id&&edge.toLine)anchorIds.add(edge.toLine);}
   if(pending?.node===n.id&&pending.line)anchorIds.add(pending.line);
@@ -93,19 +93,21 @@ function canvasLines(n){
     previewCache.set(n.code,cached);
   }
   const rows=compactPreviewLines(showComments?cached.source:cached.lines,anchorIds);
-  return foldPreviewLines(rows,n.code,cached.analysis,anchorIds,expandedFolds.get(n.code));
+  return canvasCodePreview(rows,n.code,cached.analysis,anchorIds,{
+    expanded:expandedPreviews.has(n.code),collapsedFolds:collapsedFolds.get(n.code)
+  });
 }
 function nestedEntries(n){return (n.innerFunctions||[]).map(entry=>({...entry,lineIndex:n.code.findIndex(line=>line.id===entry.lineId),scope:n.name+' / '+entry.name})).filter(entry=>entry.lineIndex>=0);}
 function endpointTitle(edge,end){const n=nodeBy(edge[end]),entry=nestedEntries(n).find(entry=>entry.id===edge[end+'Entry']);return entry?entry.scope:n.name;}
 function entryPort(n,entry){return `<button class="entry-port" data-inner-entry="${esc(n.id)}" data-inner-id="${esc(entry.id)}" data-inner-line="${esc(entry.lineId)}" aria-label="调用内部函数 ${esc(entry.name)}" title="${esc(entry.scope)} · 第 ${entry.lineIndex+1} 行入口"></button>`;}
 const foldLabel=fold=>`第 ${fold.start+2}–${fold.end} 行（${fold.end-fold.start-1} 行）`;
-function foldToggleMarkup(rows){
-  const folds=rows.filter(row=>row.fold);
-  const expanded=folds.length>0&&folds.every(row=>row.fold.expanded);
-  const label=folds.length?(expanded?'收起全部可折叠段落':'展开全部可折叠段落'):'没有可折叠段落';
-  return `<button type="button" class="node-fold-toggle" data-toggle-folds title="${label}" aria-label="${label}" aria-expanded="${expanded}" ${folds.length?'':'disabled'}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${expanded?'M4 10l4-4 4 4':'M4 6l4 4 4-4'}"/></svg></button>`;
+const foldedSummary=count=>`已收起 ${count} 行代码`;
+function foldToggleMarkup({expanded,hiddenRows}){
+  const label=hiddenRows?(expanded?'收起代码预览':'展开代码预览'):'已显示全部可预览代码';
+  return `<button type="button" class="node-fold-toggle" data-toggle-folds title="${label}" aria-label="${label}" ${hiddenRows?`aria-expanded="${expanded}"`:'disabled'}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${expanded?'M4 10l4-4 4 4':'M4 6l4 4 4-4'}"/></svg></button>`;
 }
 function codeLineMarkup(n,line,linked,entries){
+  if(line.hiddenRows)return `<div class="code-fold-summary">${foldedSummary(line.hiddenRows)}</div>`;
   if(line.fold){
     const fold=line.fold;
     return `<button type="button" class="code-fold" data-code-fold="${fold.key}" aria-expanded="${fold.expanded}">${fold.expanded?'▾ 收起':'▸ 展开'} ${foldLabel(fold)}</button>`;
@@ -152,13 +154,13 @@ function renderNodes(){
     const p=n.positions[mode];const selectedNode=selected?.type==='node'&&selected.id===n.id;
     const linked=new Set(doc.edges.flatMap(e=>[...(e.from===n.id&&e.fromLine?[e.fromLine]:[]),...(e.to===n.id&&e.toLine?[e.toLine]:[])]));
     const entries=new Map(n.exposeEmbedded===false?[]:nestedEntries(n).map(entry=>[entry.lineId,entry]));
-    const rows=mode==='code'?canvasLines(n):null;
+    const preview=mode==='code'?canvasPreview(n):null;
     return `<article class="node ${mode==='code'?'code-node':''} ${selectedNode?'selected':''} ${multi.has(n.id)?'multi-selected':''} ${matches.has(n.id)?'':'dimmed'} ${pending?.node===n.id?'connect-source':''}" data-node="${esc(n.id)}" style="left:${p.x}px;top:${p.y}px;--node-color:${n.color}" aria-label="${blockTitle(n)} ${esc(n.name)}"><span class="node-coordinates">X ${Math.round(p.x)} · Y ${Math.round(p.y)}</span>
       <button class="port in" data-port="in" title="连接到 ${esc(n.name)}" aria-label="连接到 ${esc(n.name)}" ${readOnly?'disabled tabindex="-1"':''}></button><button class="port out" data-port="out" title="从 ${esc(n.name)} 连出" aria-label="从 ${esc(n.name)} 连出" ${readOnly?'disabled tabindex="-1"':''}></button>
-      <div class="node-header"><span class="node-function-icon">${blockSymbol(n)}</span><span class="node-title" title="${esc(scopePath(doc,n))}">${esc(n.name)}${blockKind(n)==='function'?'()':''}</span>${n.parentId?`<span class="node-scope">in ${esc(scopePath(doc,nodeBy(n.parentId)))}</span>`:''}${rows?foldToggleMarkup(rows):''}<button class="node-menu" data-edit-node="${esc(n.id)}" title="${readOnly?'查看':'编辑'}${blockTitle(n)}" aria-label="${readOnly?'查看':'编辑'} ${esc(n.name)}">⋯</button></div>
+      <div class="node-header"><span class="node-function-icon">${blockSymbol(n)}</span><span class="node-title" title="${esc(scopePath(doc,n))}">${esc(n.name)}${blockKind(n)==='function'?'()':''}</span>${preview?foldToggleMarkup(preview):''}<button class="node-menu" data-edit-node="${esc(n.id)}" title="${readOnly?'查看':'编辑'}${blockTitle(n)}" aria-label="${readOnly?'查看':'编辑'} ${esc(n.name)}">⋯</button></div>
       ${n.file?`<div class="node-file" title="${esc(n.file)}">▱ ${esc(n.file)}</div>`:''}
       ${mode==='logic'&&n.exposeEmbedded!==false&&nestedEntries(n).length?`<div class="nested-entries">${nestedEntries(n).map(entry=>`<div class="nested-entry" data-entry-row="${esc(entry.id)}" style="--entry-color:${n.color}">${entryPort(n,entry)}<span class="entry-symbol">↳</span><button class="entry-name" data-entry-jump="${esc(n.id)}" data-entry-line="${esc(entry.lineId)}" title="定位 ${esc(entry.scope)} 的定义">${esc(entry.name)}()</button><span class="entry-badge">内部入口</span></div>`).join('')}</div>`:''}
-      ${rows?`<div class="code-lines">${rows.map(line=>codeLineMarkup(n,line,linked,entries)).join('')||'<div class="code-preview-empty">暂无可显示代码，双击编辑查看完整内容</div>'}</div>`:`<div class="node-description" title="${esc(n.description)}">${esc(n.description)||'添加一句函数说明…'}</div>`}
+      ${preview?`<div class="code-lines">${preview.rows.map(line=>codeLineMarkup(n,line,linked,entries)).join('')||'<div class="code-preview-empty">暂无可显示代码，双击编辑查看完整内容</div>'}</div>`:`<div class="node-description" title="${esc(n.description)}">${esc(n.description)||'添加一句函数说明…'}</div>`}
       <div class="node-tags">${n.tags.slice(0,5).map(t=>`<span class="node-tag">${esc(t)}</span>`).join('')||'<span class="node-tag">未分类</span>'}${n.tags.length>5?`<span class="node-tag">+${n.tags.length-5}</span>`:''}</div>
       <div class="node-foot"><button class="note-btn" data-note="${esc(n.id)}" title="展开或收起备注">${n.note?'▤ '+esc(n.note.split('\n')[0]):'＋ 添加备注'}</button><span>${mode==='code'?n.code.length+' lines':blockKind(n)==='function'?doc.edges.filter(e=>e.from===n.id&&e.type==='call').length+' 次调用':blockTitle(n)}</span></div>
       ${n.note?`<div class="node-note ${openNotes.has(n.id)?'open':''}">${esc(n.note)}</div>`:''}
@@ -394,7 +396,7 @@ function exportSvg(){
   const ids=new Set(chosen.map(n=>n.id));
   const geometry=new Map();
   const paths=doc.edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).map(e=>{const g=edgeGeometry(e,geometry);return `<g><path d="${g.d}" fill="none" stroke="${e.type==='call'?'#71c9ef':'#b5a1e7'}" stroke-width="1.7" ${e.type==='return'?'stroke-dasharray="6 5"':''} marker-end="url(#arrow)"/></g>`;}).join('');
-  const blocks=chosen.map(n=>{const r=measureNode(n);return `<g transform="translate(${r.x} ${r.y})"><rect width="${r.w}" height="${r.h}" rx="9" fill="#192536" stroke="${n.color}"/><text x="17" y="32" fill="${n.color}" font-size="14">ƒ  ${esc(n.name)}()</text><path d="M0 56H${r.w}" stroke="#414956"/>${mode==='code'?canvasLines(n).map((l,i)=>`<text x="14" y="${83+i*24}" fill="#c2cbd7" font-size="10" xml:space="preserve">${l.fold?'⋯':String(l.index+1).padStart(2,' ')}  ${esc((l.fold?foldLabel(l.fold):l.hiddenCommentAnchor?'注释已隐藏 · 连线锚点':l.hiddenBlankAnchor?'空行 · 连线锚点':l.text).slice(0,51))}</text>`).join(''):`<text x="16" y="81" font-size="11" fill="#a6b1c0">${esc(n.description.slice(0,25))}</text>`}<text x="16" y="${r.h-39}" font-size="10" fill="${n.color}">${esc(n.tags.join(' · ').slice(0,45))}</text><text x="16" y="${r.h-12}" font-size="9" fill="#8f9cae">${esc((n.note?'▤ '+n.note.split('\n')[0]:'无备注').slice(0,40))}</text></g>`;}).join('');
+  const blocks=chosen.map(n=>{const r=measureNode(n);return `<g transform="translate(${r.x} ${r.y})"><rect width="${r.w}" height="${r.h}" rx="9" fill="#192536" stroke="${n.color}"/><text x="17" y="32" fill="${n.color}" font-size="14">ƒ  ${esc(n.name)}()</text><path d="M0 56H${r.w}" stroke="#414956"/>${mode==='code'?canvasPreview(n).rows.map((l,i)=>`<text x="14" y="${83+i*24}" fill="#c2cbd7" font-size="10" xml:space="preserve">${l.fold||l.hiddenRows?'⋯':String(l.index+1).padStart(2,' ')}  ${esc((l.hiddenRows?foldedSummary(l.hiddenRows):l.fold?foldLabel(l.fold):l.hiddenCommentAnchor?'注释已隐藏 · 连线锚点':l.hiddenBlankAnchor?'空行 · 连线锚点':l.text).slice(0,51))}</text>`).join(''):`<text x="16" y="81" font-size="11" fill="#a6b1c0">${esc(n.description.slice(0,25))}</text>`}<text x="16" y="${r.h-39}" font-size="10" fill="${n.color}">${esc(n.tags.join(' · ').slice(0,45))}</text><text x="16" y="${r.h-12}" font-size="9" fill="#8f9cae">${esc((n.note?'▤ '+n.note.split('\n')[0]:'无备注').slice(0,40))}</text></g>`;}).join('');
   const groupShapes=(doc.groups||[]).filter(g=>g.members.some(id=>ids.has(id))).map(g=>{const r=groupBounds(g);return `<g><rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="14" fill="${g.color}" fill-opacity=".03" stroke="${g.color}" stroke-opacity=".5" stroke-dasharray="6 5"/><text x="${r.x+15}" y="${r.y+22}" fill="${g.color}" font-size="11">${esc(g.name)}</text></g>`;}).join('');
   download(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${maxX-minX} ${maxY-minY}" width="${maxX-minX}" height="${maxY-minY}" style="background:#0c1220;font-family:Consolas,'Microsoft YaHei',monospace"><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#71c9ef"/></marker></defs><rect x="${minX}" y="${minY}" width="${maxX-minX}" height="${maxY-minY}" fill="#0c1220"/><text x="${minX+30}" y="${minY+35}" fill="#e5edf8" font-size="16">${esc(doc.title)} · ${mode==='logic'?'逻辑模式':'代码模式'}</text>${groupShapes}${paths}${blocks}</svg>`,'image/svg+xml;charset=utf-8','svg');toast('当前视图已导出为 SVG');
 }
@@ -483,18 +485,20 @@ $('nodes').addEventListener('click',e=>{
   if(toggle||fold){
     if(toggle?.disabled)return;
     const node=nodeBy(id);
-    let expanded,focusSelector;
+    let focusSelector;
     if(toggle){
-      const keys=toggle.getAttribute('aria-expanded')==='true'?[]:[...nEl.querySelectorAll('[data-code-fold]')].map(row=>row.dataset.codeFold);
-      expanded=new Set(keys);
+      if(expandedPreviews.has(node.code)){
+        expandedPreviews.delete(node.code);
+        collapsedFolds.delete(node.code);
+      }else expandedPreviews.add(node.code);
       focusSelector='[data-toggle-folds]';
     }else{
       const key=fold.dataset.codeFold;
-      expanded=expandedFolds.get(node.code)||new Set();
-      if(expanded.has(key))expanded.delete(key);else expanded.add(key);
+      const collapsed=collapsedFolds.get(node.code)||new Set();
+      if(collapsed.has(key))collapsed.delete(key);else collapsed.add(key);
+      collapsedFolds.set(node.code,collapsed);
       focusSelector=`[data-code-fold="${key}"]`;
     }
-    expandedFolds.set(node.code,expanded);
     renderNodes();renderGroups();drawEdges();
     nodeElement(id).querySelector(focusSelector)?.focus({preventScroll:true});
     return;

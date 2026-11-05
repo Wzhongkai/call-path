@@ -91,7 +91,7 @@ export function compactPreviewLines(lines,anchorIds=new Set()){
     return [{...line,text:'',...(line.commentOnly?{hiddenCommentAnchor:true}:{hiddenBlankAnchor:true})}];
   });
 }
-export function foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,expanded=new Set()){
+export function foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,toggled=new Set(),defaultExpanded=false){
   if(!analysis.braces.length)return visibleLines;
   const protectedLines=new Int32Array(sourceLines.length+1);
   for(const [start,end] of analysis.calls){protectedLines[start]++;protectedLines[end+1]--;}
@@ -141,12 +141,27 @@ export function foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,exp
   for(const {start,end} of ranges){
     if(start+1<lastEnd)continue;
     while(row<visibleLines.length&&visibleLines[row].index<=start)result.push(visibleLines[row++]);
-    const key=start+'-'+end,isExpanded=expanded.has(key);
+    const key=start+'-'+end,isExpanded=defaultExpanded!==toggled.has(key);
     result.push({fold:{key,start,end,expanded:isExpanded}});
     if(!isExpanded)while(row<visibleLines.length&&visibleLines[row].index<end)row++;
     lastEnd=end;
   }
   return result.concat(visibleLines.slice(row));
+}
+export function canvasCodePreview(visibleLines,sourceLines,analysis,anchorIds,{expanded=false,collapsedFolds}={}){
+  let call=0,callEnd=-1;
+  const keptRows=visibleLines.filter(line=>{
+    while(call<analysis.calls.length&&analysis.calls[call][0]<=line.index){
+      callEnd=Math.max(callEnd,analysis.calls[call++][1]);
+    }
+    return line.index<=callEnd||anchorIds.has(line.id);
+  });
+  const hiddenRows=visibleLines.length-keptRows.length;
+  if(!hiddenRows)return {rows:visibleLines,hiddenRows,expanded:false};
+  const rows=expanded
+    ?foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,collapsedFolds,true)
+    :[...keptRows,{hiddenRows}];
+  return {rows,hiddenRows,expanded};
 }
 export function changedLineRanges(changes,before,after){
   const ranges=[];

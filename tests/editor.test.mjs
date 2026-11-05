@@ -4,7 +4,7 @@ import {EditorState} from '@codemirror/state';
 import {keymap} from '@codemirror/view';
 import {insertNewlineAndIndent,indentMore,indentLess} from '@codemirror/commands';
 import {foldState,foldKeymap} from '@codemirror/language';
-import {languageExtension,indentationExtensions,sourceEditorSetup,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines,changedLineRanges} from '../src/editor.js';
+import {languageExtension,indentationExtensions,sourceEditorSetup,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines,canvasCodePreview,changedLineRanges} from '../src/editor.js';
 import {reconcileLines,createDemo,validateDocument} from '../dist/model.js';
 test('C and Rust Enter uses configured automatic indentation',()=>{
   for(const [type,doc] of [['c','int main() {'],['rust','fn main() {']]){
@@ -108,6 +108,23 @@ test('short mixed C functions fold work between calls while keeping complete cal
   const rows=foldPreviewLines(visible,code,analysis,anchors);
   assert.deepEqual(rows.filter(row=>row.fold).map(({fold})=>[fold.start+1,fold.end-1]),[[3,8]]);
   for(const index of [0,1,2,9,10,11,12,13,14,15])assert.ok(rows.some(row=>row.index===index),source[index]);
+});
+
+test('a call-heavy block hides other rows even with no brace folds, preserving unlinked calls and their arguments',()=>{
+  const work=Array.from({length:140},()=>['  i += 1;','  step(i);']).flat();
+  const source=['int f() {','  int i = 0;',...work,'  finish(','    i);','  return i;','}'];
+  const code=source.map((text,index)=>({id:'line'+index,text}));
+  const anchors=new Set(['line1','line284']);
+  const analysis=analyzeCodePreview(code,'c');
+  const visible=compactPreviewLines(codePreviewLines(code,'c',analysis),anchors);
+  assert.equal(foldPreviewLines(visible,code,analysis,anchors).length,source.length);
+  const compact=canvasCodePreview(visible,code,analysis,anchors);
+  const expected=visible.filter(line=>anchors.has(line.id)||/step|finish|    i\);/.test(line.text));
+  assert.deepEqual(compact.rows,[...expected,{hiddenRows:source.length-expected.length}]);
+  assert.equal(compact.expanded,false);
+  const open=canvasCodePreview(visible,code,analysis,anchors,{expanded:true});
+  assert.deepEqual(open.rows,visible);
+  assert.equal(open.expanded,true);
 });
 
 test('10,000-line code validates, folds to a few rows and keeps stable IDs on distant edits',()=>{
