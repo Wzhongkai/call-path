@@ -99,6 +99,12 @@ function nestedEntries(n){return (n.innerFunctions||[]).map(entry=>({...entry,li
 function endpointTitle(edge,end){const n=nodeBy(edge[end]),entry=nestedEntries(n).find(entry=>entry.id===edge[end+'Entry']);return entry?entry.scope:n.name;}
 function entryPort(n,entry){return `<button class="entry-port" data-inner-entry="${esc(n.id)}" data-inner-id="${esc(entry.id)}" data-inner-line="${esc(entry.lineId)}" aria-label="调用内部函数 ${esc(entry.name)}" title="${esc(entry.scope)} · 第 ${entry.lineIndex+1} 行入口"></button>`;}
 const foldLabel=fold=>`第 ${fold.start+2}–${fold.end} 行（${fold.end-fold.start-1} 行）`;
+function foldToggleMarkup(rows){
+  const folds=rows.filter(row=>row.fold);
+  const expanded=folds.length>0&&folds.every(row=>row.fold.expanded);
+  const label=folds.length?(expanded?'收起全部可折叠段落':'展开全部可折叠段落'):'没有可折叠段落';
+  return `<button type="button" class="node-fold-toggle" data-toggle-folds title="${label}" aria-label="${label}" aria-expanded="${expanded}" ${folds.length?'':'disabled'}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${expanded?'M4 10l4-4 4 4':'M4 6l4 4 4-4'}"/></svg></button>`;
+}
 function codeLineMarkup(n,line,linked,entries){
   if(line.fold){
     const fold=line.fold;
@@ -146,12 +152,13 @@ function renderNodes(){
     const p=n.positions[mode];const selectedNode=selected?.type==='node'&&selected.id===n.id;
     const linked=new Set(doc.edges.flatMap(e=>[...(e.from===n.id&&e.fromLine?[e.fromLine]:[]),...(e.to===n.id&&e.toLine?[e.toLine]:[])]));
     const entries=new Map(n.exposeEmbedded===false?[]:nestedEntries(n).map(entry=>[entry.lineId,entry]));
+    const rows=mode==='code'?canvasLines(n):null;
     return `<article class="node ${mode==='code'?'code-node':''} ${selectedNode?'selected':''} ${multi.has(n.id)?'multi-selected':''} ${matches.has(n.id)?'':'dimmed'} ${pending?.node===n.id?'connect-source':''}" data-node="${esc(n.id)}" style="left:${p.x}px;top:${p.y}px;--node-color:${n.color}" aria-label="${blockTitle(n)} ${esc(n.name)}"><span class="node-coordinates">X ${Math.round(p.x)} · Y ${Math.round(p.y)}</span>
       <button class="port in" data-port="in" title="连接到 ${esc(n.name)}" aria-label="连接到 ${esc(n.name)}" ${readOnly?'disabled tabindex="-1"':''}></button><button class="port out" data-port="out" title="从 ${esc(n.name)} 连出" aria-label="从 ${esc(n.name)} 连出" ${readOnly?'disabled tabindex="-1"':''}></button>
-      <div class="node-header"><span class="node-function-icon">${blockSymbol(n)}</span><span class="node-title" title="${esc(scopePath(doc,n))}">${esc(n.name)}${blockKind(n)==='function'?'()':''}</span>${n.parentId?`<span class="node-scope">in ${esc(scopePath(doc,nodeBy(n.parentId)))}</span>`:''}<button class="node-menu" data-edit-node="${esc(n.id)}" title="${readOnly?'查看':'编辑'}${blockTitle(n)}" aria-label="${readOnly?'查看':'编辑'} ${esc(n.name)}">⋯</button></div>
+      <div class="node-header"><span class="node-function-icon">${blockSymbol(n)}</span><span class="node-title" title="${esc(scopePath(doc,n))}">${esc(n.name)}${blockKind(n)==='function'?'()':''}</span>${n.parentId?`<span class="node-scope">in ${esc(scopePath(doc,nodeBy(n.parentId)))}</span>`:''}${rows?foldToggleMarkup(rows):''}<button class="node-menu" data-edit-node="${esc(n.id)}" title="${readOnly?'查看':'编辑'}${blockTitle(n)}" aria-label="${readOnly?'查看':'编辑'} ${esc(n.name)}">⋯</button></div>
       ${n.file?`<div class="node-file" title="${esc(n.file)}">▱ ${esc(n.file)}</div>`:''}
       ${mode==='logic'&&n.exposeEmbedded!==false&&nestedEntries(n).length?`<div class="nested-entries">${nestedEntries(n).map(entry=>`<div class="nested-entry" data-entry-row="${esc(entry.id)}" style="--entry-color:${n.color}">${entryPort(n,entry)}<span class="entry-symbol">↳</span><button class="entry-name" data-entry-jump="${esc(n.id)}" data-entry-line="${esc(entry.lineId)}" title="定位 ${esc(entry.scope)} 的定义">${esc(entry.name)}()</button><span class="entry-badge">内部入口</span></div>`).join('')}</div>`:''}
-      ${mode==='code'?`<div class="code-lines">${canvasLines(n).map(line=>codeLineMarkup(n,line,linked,entries)).join('')||'<div class="code-preview-empty">暂无可显示代码，双击编辑查看完整内容</div>'}</div>`:`<div class="node-description" title="${esc(n.description)}">${esc(n.description)||'添加一句函数说明…'}</div>`}
+      ${rows?`<div class="code-lines">${rows.map(line=>codeLineMarkup(n,line,linked,entries)).join('')||'<div class="code-preview-empty">暂无可显示代码，双击编辑查看完整内容</div>'}</div>`:`<div class="node-description" title="${esc(n.description)}">${esc(n.description)||'添加一句函数说明…'}</div>`}
       <div class="node-tags">${n.tags.slice(0,5).map(t=>`<span class="node-tag">${esc(t)}</span>`).join('')||'<span class="node-tag">未分类</span>'}${n.tags.length>5?`<span class="node-tag">+${n.tags.length-5}</span>`:''}</div>
       <div class="node-foot"><button class="note-btn" data-note="${esc(n.id)}" title="展开或收起备注">${n.note?'▤ '+esc(n.note.split('\n')[0]):'＋ 添加备注'}</button><span>${mode==='code'?n.code.length+' lines':blockKind(n)==='function'?doc.edges.filter(e=>e.from===n.id&&e.type==='call').length+' 次调用':blockTitle(n)}</span></div>
       ${n.note?`<div class="node-note ${openNotes.has(n.id)?'open':''}">${esc(n.note)}</div>`:''}
@@ -472,13 +479,24 @@ $('import-file').addEventListener('change',async e=>{const file=e.target.files?.
 $('nodes').addEventListener('click',e=>{
   if(suppressClick)return;
   const nEl=e.target.closest('[data-node]');if(!nEl)return;const id=nEl.dataset.node;
-  const fold=e.target.closest('[data-code-fold]');
-  if(fold){
-    const node=nodeBy(id),key=fold.dataset.codeFold,expanded=expandedFolds.get(node.code)||new Set();
-    if(expanded.has(key))expanded.delete(key);else expanded.add(key);
+  const toggle=e.target.closest('[data-toggle-folds]'),fold=e.target.closest('[data-code-fold]');
+  if(toggle||fold){
+    if(toggle?.disabled)return;
+    const node=nodeBy(id);
+    let expanded,focusSelector;
+    if(toggle){
+      const keys=toggle.getAttribute('aria-expanded')==='true'?[]:[...nEl.querySelectorAll('[data-code-fold]')].map(row=>row.dataset.codeFold);
+      expanded=new Set(keys);
+      focusSelector='[data-toggle-folds]';
+    }else{
+      const key=fold.dataset.codeFold;
+      expanded=expandedFolds.get(node.code)||new Set();
+      if(expanded.has(key))expanded.delete(key);else expanded.add(key);
+      focusSelector=`[data-code-fold="${key}"]`;
+    }
     expandedFolds.set(node.code,expanded);
     renderNodes();renderGroups();drawEdges();
-    nodeElement(id).querySelector(`[data-code-fold="${key}"]`)?.focus({preventScroll:true});
+    nodeElement(id).querySelector(focusSelector)?.focus({preventScroll:true});
     return;
   }
   const row=e.target.closest('[data-line]'),line=row?.dataset.line||null;
@@ -495,7 +513,7 @@ $('nodes').addEventListener('click',e=>{
   select('node',id,false);
 });
 $('edges').addEventListener('click',e=>{if(suppressClick)return;const edge=e.target.closest('[data-edge]');if(edge){if(e.ctrlKey||e.metaKey){const model=edgeBy(edge.dataset.edge);jumpToNode(model.to,model.toLine);}else if(!isConnecting())select('edge',edge.dataset.edge);}});
-$('nodes').addEventListener('dblclick',e=>{if(suppressClick||isConnecting()||performance.now()-lastConnectionAt<450)return;const n=e.target.closest('[data-node]');if(!n||e.ctrlKey||e.metaKey||e.target.closest('[data-note],[data-port],[data-line-port],[data-inner-entry],[data-entry-jump],[data-code-fold]'))return;const id=n.dataset.node;if(tagEditing&&tags.length===1){const tag=tags[0],node=nodeBy(id);if(node.tags.includes(tag)){toast(node.name+' 已属于「'+tag+'」');return;}try{if(node.tags.length>=20)throw Error('一个函数最多支持 20 个标签');commit(()=>{assignNodeTag(doc,id,tag);selected={type:'node',id};});toast('已将 '+node.name+' 加入「'+tag+'」');}catch(err){toast(err.message);}return;}select('node',id);});
+$('nodes').addEventListener('dblclick',e=>{if(suppressClick||isConnecting()||performance.now()-lastConnectionAt<450)return;const n=e.target.closest('[data-node]');if(!n||e.ctrlKey||e.metaKey||e.target.closest('[data-note],[data-port],[data-line-port],[data-inner-entry],[data-entry-jump],[data-code-fold],[data-toggle-folds]'))return;const id=n.dataset.node;if(tagEditing&&tags.length===1){const tag=tags[0],node=nodeBy(id);if(node.tags.includes(tag)){toast(node.name+' 已属于「'+tag+'」');return;}try{if(node.tags.length>=20)throw Error('一个函数最多支持 20 个标签');commit(()=>{assignNodeTag(doc,id,tag);selected={type:'node',id};});toast('已将 '+node.name+' 加入「'+tag+'」');}catch(err){toast(err.message);}return;}select('node',id);});
 $('edges').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const edge=e.target.closest('[data-edge]');if(edge){e.preventDefault();select('edge',edge.dataset.edge);}}});
 $('inspector').addEventListener('cancel',()=>{selected=null;renderSidebar();renderNodes();drawEdges();});
 $('inspector').addEventListener('submit',event=>{if(readOnly){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
@@ -508,7 +526,7 @@ $('viewport').addEventListener('pointerdown',e=>{
   const group=e.target.closest('[data-group]');
   const touchPan=e.pointerType==='touch'&&!isConnecting()&&!e.target.closest('button')&&((n&&(readOnly||!e.target.closest('.node-header')))||(group&&(readOnly||!e.target.closest('.group-header')))||e.target.closest('[data-edge]'));
   if(touchPan){drag={type:'pan',startX:e.clientX,startY:e.clientY,original:{x:camera().x,y:camera().y},moved:false};}
-  else if(n){if(!canMoveBlocks()||e.ctrlKey||e.metaKey||e.shiftKey||pending||!e.target.closest('.node-header')||e.target.closest('[data-edit-node]'))return;const id=n.dataset.node;drag={type:'node',id,startX:e.clientX,startY:e.clientY,original:{...blockPosition({type:'node',id})},before:clone(doc),moved:false};}
+  else if(n){if(!canMoveBlocks()||e.ctrlKey||e.metaKey||e.shiftKey||pending||!e.target.closest('.node-header')||e.target.closest('[data-edit-node],[data-toggle-folds]'))return;const id=n.dataset.node;drag={type:'node',id,startX:e.clientX,startY:e.clientY,original:{...blockPosition({type:'node',id})},before:clone(doc),moved:false};}
   else if(group){if(!canMoveBlocks()||pending||e.ctrlKey||e.metaKey||e.shiftKey||!e.target.closest('.group-header')||e.target.closest('[data-edit-group]'))return;const g=groupBy(group.dataset.group);drag={type:'group',id:g.id,startX:e.clientX,startY:e.clientY,original:{...g.positions[mode]},before:clone(doc),moved:false};}
   else if(!e.target.closest('[data-edge]')){drag={type:'pan',startX:e.clientX,startY:e.clientY,original:{x:camera().x,y:camera().y},moved:false};}
   if(drag){drag.pointerId=e.pointerId;e.preventDefault();window.getSelection()?.removeAllRanges();$('viewport').focus({preventScroll:true});}
@@ -600,7 +618,7 @@ document.addEventListener('keydown',e=>{
   const editable=e.target.closest('input,textarea,select,[contenteditable=true]');
   if($('inspector').open&&(e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();$('inspector').querySelector('form')?.requestSubmit();return;}
   if(e.key==='Escape'){if(isConnecting()||tool==='move'){setTool('select');return;}if(!$('help-dialog').open&&!$('export-dialog').open&&!editable){selected=null;render();}return;}
-  if(editable||(e.key==='Enter'&&e.target.closest('[data-code-fold]'))||$('account-dialog').open||$('inspector').open||$('projects-dialog').open||$('jump-dialog').open||$('help-dialog').open||$('export-dialog').open)return;
+  if(editable||(e.key==='Enter'&&e.target.closest('[data-code-fold],[data-toggle-folds]'))||$('account-dialog').open||$('inspector').open||$('projects-dialog').open||$('jump-dialog').open||$('help-dialog').open||$('export-dialog').open)return;
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();beginKeyMotion(e);return;}
   if(e.key==='Shift'&&keyMotion)keyMotion.boost=true;
   if(e.key==='Enter'&&selected){e.preventDefault();renderInspector();openInspector();return;}

@@ -182,3 +182,7 @@ dialog::backdrop,dialog.inspector::backdrop{background:#060d1bbd}
 .code-fold{display:block;width:100%;height:24px;padding:0 14px 0 36px;text-align:left;font:inherit;font-size:11px;color:#9ab9d7;background:#192a40}
 .code-fold:hover,.code-fold:focus-visible{background:#263c57;color:#dfedfb}
 .code-fold:focus-visible{outline-offset:-2px}
+.node-fold-toggle{display:grid;place-items:center;flex:0 0 28px;height:34px;margin-left:auto;padding:0;border-radius:6px;color:#a1bfda}
+.node-fold-toggle + .node-menu{margin-left:0}
+.node-fold-toggle svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.node-fold-toggle:hover:not(:disabled),.node-fold-toggle:focus-visible{background:#263c57;color:#dfedfb}
