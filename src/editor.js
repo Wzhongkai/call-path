@@ -16,6 +16,7 @@ import {oneDark} from '@codemirror/theme-one-dark';
 export function languageExtension(type){return ({javascript:()=>javascript(),typescript:()=>javascript({typescript:true}),python,rust,c:cpp,cpp,java,go,sql,json,plain:()=>[]}[type]||javascript)();}
 export function indentationExtensions(size){return [EditorState.tabSize.of(size),indentUnit.of(' '.repeat(size))];}
 const callSyntax=/^(CallExpression|CallExpr|NewExpression|MethodInvocation|ObjectCreationExpression|MacroInvocation|ExplicitConstructorInvocation|TaggedTemplateExpression)$/;
+const MIN_FOLD_ROWS=5;
 // Use the same language parser as the editor to distinguish code from strings and comments.
 export function analyzeCodePreview(lines,language='javascript'){
   const text=lines.map(line=>line.text).join('\n'),parser=languageExtension(language)?.language?.parser;
@@ -28,13 +29,22 @@ export function analyzeCodePreview(lines,language='javascript'){
   }
   if(parser)parser.parse(text).iterate({enter(node){
     if(/comment/i.test(node.name)){comments.push({from:node.from,to:node.to});return false;}
-    if(lines.length<40)return;
     if(callSyntax.test(node.name))calls.push([lineAt(node.from),lineAt(Math.max(node.from,node.to-1))]);
     if(node.name==='{'&&node.from<node.to){
-      const close=node.node.parent?.lastChild;
+      const open=node.node,close=open.parent?.lastChild;
       if(close?.name==='}'&&close.from<close.to){
         const start=lineAt(node.from),end=lineAt(close.from);
-        if(end-start>=7)braces.push({start,end});
+        if(end-start>MIN_FOLD_ROWS){
+          const statements=[];
+          for(let child=open.nextSibling;child&&child.from<close.from;child=child.nextSibling){
+            if(child.from===child.to)continue;
+            const first=lineAt(child.from),last=lineAt(child.to-1);
+            const previous=statements.at(-1);
+            if(previous&&first<=previous.last)previous.last=Math.max(previous.last,last);
+            else statements.push({first,last});
+          }
+          braces.push({start,end,statements});
+        }
       }
     }
   }});
@@ -75,13 +85,45 @@ export function foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,exp
     if(calls||anchorIds.has(line.id))protectedCount++;
   }
   protectedLines[sourceLines.length]=protectedCount;
+  const countVisible=new Uint32Array(sourceLines.length+1);
+  const countScopes=new Uint32Array(sourceLines.length+1);
+  for(const line of visibleLines)countVisible[line.index+1]=1;
+  for(const {start} of analysis.braces)countScopes[start+1]++;
+  for(let i=1;i<countVisible.length;i++){
+    countVisible[i]+=countVisible[i-1];
+    countScopes[i]+=countScopes[i-1];
+  }
+  const ranges=[];
+  const protectedIn=(first,last)=>protectedLines[last+1]!==protectedLines[first];
+  function offer(first,last){
+    if(countVisible[last+1]-countVisible[first]>=MIN_FOLD_ROWS)ranges.push({start:first-1,end:last+1});
+  }
+  for(const {start,end,statements} of analysis.braces){
+    if(!protectedIn(start+1,end-1)){
+      offer(start+1,end-1);
+      continue;
+    }
+    // In a mixed body, fold complete sibling statements. Nested scopes get their own folds.
+    let run=null;
+    for(const {first,last} of statements){
+      const keep=first<=start||last>=end||protectedIn(first,last)||countScopes[last+1]!==countScopes[first];
+      if(run&&(keep||(first>run.last+1&&protectedIn(run.last+1,first-1)))){
+        offer(run.first,run.last);
+        run=null;
+      }
+      if(!keep){
+        if(run)run.last=Math.max(run.last,last);
+        else run={first,last};
+      }
+    }
+    if(run)offer(run.first,run.last);
+  }
+  ranges.sort((a,b)=>a.start-b.start||b.end-a.end);
   const result=[];
   let row=0,lastEnd=0;
-  for(const {start,end} of analysis.braces){
-    if(start<lastEnd||protectedLines[end]!==protectedLines[start+1])continue;
+  for(const {start,end} of ranges){
+    if(start+1<lastEnd)continue;
     while(row<visibleLines.length&&visibleLines[row].index<=start)result.push(visibleLines[row++]);
-    // Comments and blank rows may have already compacted this range.
-    if(row+1>=visibleLines.length||visibleLines[row+1].index>=end)continue;
     const key=start+'-'+end,isExpanded=expanded.has(key);
     result.push({fold:{key,start,end,expanded:isExpanded}});
     if(!isExpanded)while(row<visibleLines.length&&visibleLines[row].index<end)row++;

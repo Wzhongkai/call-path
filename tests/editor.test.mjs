@@ -73,12 +73,29 @@ test('a long brace block folds while calls, multiline arguments, and anchors sta
   const anchors=new Set([code.at(-3).id]);
   const visible=compactPreviewLines(codePreviewLines(code,'c',analysis),anchors);
   const rows=foldPreviewLines(visible,code,analysis,anchors);
-  assert.deepEqual(rows.filter(row=>row.fold).map(row=>row.fold.key),['1-33']);
+  const folds=rows.filter(row=>row.fold).map(row=>row.fold);
+  assert.equal(folds.length,3);
+  assert.equal(folds[0].key,'1-33');
   assert.equal(rows.find(row=>row.id==='line2'),undefined);
   for(const line of [1,33,35,36,code.length-3])assert.ok(rows.some(row=>row.index===line));
   const expanded=foldPreviewLines(visible,code,analysis,anchors,new Set(['1-33']));
-  assert.deepEqual(expanded.filter(row=>!row.fold),visible);
+  assert.deepEqual(expanded.filter(row=>row.index>1&&row.index<33),visible.filter(row=>row.index>1&&row.index<33));
   assert.equal(expanded.find(row=>row.fold).fold.expanded,true);
+});
+
+test('short mixed C functions fold work between calls while keeping complete call and control statements',()=>{
+  const source=[
+    'int f (int flag)', '{', '  begin ();',
+    '  int value = 0;', '  value += 1;', '  value += 2;', '  value += 3;', '  value += 4;', '  value += 5;',
+    '  value++; if (flag)', '    {', '      finish (', '        value);', '    }',
+    '  return value;', '}',
+  ];
+  const code=source.map((text,index)=>({id:'line'+index,text}));
+  const analysis=analyzeCodePreview(code,'c'),anchors=new Set();
+  const visible=compactPreviewLines(codePreviewLines(code,'c',analysis),anchors);
+  const rows=foldPreviewLines(visible,code,analysis,anchors);
+  assert.deepEqual(rows.filter(row=>row.fold).map(({fold})=>[fold.start+1,fold.end-1]),[[3,8]]);
+  for(const index of [0,1,2,9,10,11,12,13,14,15])assert.ok(rows.some(row=>row.index===index),source[index]);
 });
 
 test('10,000-line code validates, folds to a few rows and keeps stable IDs on distant edits',()=>{
