@@ -50,6 +50,7 @@ fn document(value: &Value) -> Check {
     let nodes = array(&value["nodes"], 200)?;
     let edges = array(&value["edges"], 1000)?;
     let mut by_id = HashMap::new();
+    let mut line_ids = HashMap::new();
     for node in nodes {
         let node_id = id(&node["id"])?;
         if by_id.insert(node_id, node).is_some()
@@ -103,7 +104,7 @@ fn document(value: &Value) -> Check {
                 return Err("标签无效");
             }
         }
-        let code = array(&node["code"], 400)?;
+        let code = node["code"].as_array().ok_or("代码列表格式错误")?;
         if code.is_empty() {
             return Err("代码至少需要一行");
         }
@@ -127,6 +128,7 @@ fn document(value: &Value) -> Check {
                 }
             }
         }
+        line_ids.insert(node_id, lines);
         position(&node["positions"])?;
     }
     for node in nodes {
@@ -155,15 +157,14 @@ fn document(value: &Value) -> Check {
             }
         }
         for end in ["from", "to"] {
-            let node = by_id.get(id(&edge[end])?).ok_or("连线引用了不存在的函数")?;
+            let node_id = id(&edge[end])?;
+            let node = by_id.get(node_id).ok_or("连线引用了不存在的函数")?;
             let line = &edge[format!("{end}Line")];
             let entry = &edge[format!("{end}Entry")];
             if !line.is_null()
-                && !node["code"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|l| l["id"] == *line)
+                && !line
+                    .as_str()
+                    .is_some_and(|line| line_ids[node_id].contains(line))
             {
                 return Err("连线引用了不存在的代码行");
             }

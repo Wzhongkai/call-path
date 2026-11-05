@@ -1,8 +1,8 @@
 import {COLORS,uid,clone,createDemo,reconcileLines,repairAnchors,filterNodes,deleteNode,deleteEdge,validateDocument,scopePath,canParent,assignNodeTag,setBlockPosition as assignBlockPosition,setLayoutSync} from './model.js';
-import {routeBlocks,returnAlong,pathFor} from './geometry.js';
+import {routeBlocks,routeConnection,pathFor,separateBlocks,slideBlocks} from './geometry.js';
 import {LANGUAGES,highlightCode} from './highlight.js';
 import {createWorkspace,validateWorkspace,addProject,renameProject,softDeleteProject,restoreProject,buildFileTree} from './workspace.js';
-import {createCodeEditor,codePreviewLines,compactPreviewLines} from './vendor/editor.js';
+import {createCodeEditor,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines} from './vendor/editor.js';
 import {emptyProject} from './workspace.js';
 import {connectAccount,mountAccount} from './account.js';
 import {dismissOnBackdrop} from './dialog.js';
@@ -26,7 +26,8 @@ let pointConnect=false,lastConnectionAt=-Infinity;
 const isConnecting=()=>tool==='call'||tool==='return'||Boolean(pending);
 const canMoveBlocks=()=>!readOnly&&tool==='move';
 let codeEditor=null,editorLines=null,innerDraft=[];
-let showComments=false;const previewCache=new WeakMap();
+let showComments=false;const previewCache=new WeakMap(),expandedFolds=new WeakMap();
+let canvasRects=new Map();
 try{showComments=localStorage.getItem('callpath.show-comments')==='true';}catch{}
 let treeDragUntil=0;
 let cameras={logic:{x:0,y:0,z:1},code:{x:0,y:0,z:1}},history=[],future=[],storageFailed=false;
@@ -83,14 +84,29 @@ function syntax(text,node,lineId){const attrs=(name,ids)=>`data-function-name="$
 function canvasLines(n){
   const anchorIds=new Set(nestedEntries(n).map(entry=>entry.lineId));
   for(const edge of doc.edges){if(edge.from===n.id&&edge.fromLine)anchorIds.add(edge.fromLine);if(edge.to===n.id&&edge.toLine)anchorIds.add(edge.toLine);}
-  if(showComments)return compactPreviewLines(n.code.map((line,index)=>({...line,index})),anchorIds);
-  let cached=previewCache.get(n.code);if(!cached||cached.language!==n.language){cached={language:n.language,lines:codePreviewLines(n.code,n.language||'javascript')};previewCache.set(n.code,cached);}
-  return compactPreviewLines(cached.lines,anchorIds);
+  if(pending?.node===n.id&&pending.line)anchorIds.add(pending.line);
+  if(focusedLine?.node===n.id)anchorIds.add(focusedLine.line);
+  let cached=previewCache.get(n.code);
+  if(!cached||cached.language!==n.language){
+    const analysis=analyzeCodePreview(n.code,n.language);
+    cached={language:n.language,analysis,source:n.code.map((line,index)=>({...line,index})),lines:codePreviewLines(n.code,n.language,analysis)};
+    previewCache.set(n.code,cached);
+  }
+  const rows=compactPreviewLines(showComments?cached.source:cached.lines,anchorIds);
+  return foldPreviewLines(rows,n.code,cached.analysis,anchorIds,expandedFolds.get(n.code));
 }
 function nestedEntries(n){return (n.innerFunctions||[]).map(entry=>({...entry,lineIndex:n.code.findIndex(line=>line.id===entry.lineId),scope:n.name+' / '+entry.name})).filter(entry=>entry.lineIndex>=0);}
 function endpointTitle(edge,end){const n=nodeBy(edge[end]),entry=nestedEntries(n).find(entry=>entry.id===edge[end+'Entry']);return entry?entry.scope:n.name;}
 function entryPort(n,entry){return `<button class="entry-port" data-inner-entry="${esc(n.id)}" data-inner-id="${esc(entry.id)}" data-inner-line="${esc(entry.lineId)}" aria-label="调用内部函数 ${esc(entry.name)}" title="${esc(entry.scope)} · 第 ${entry.lineIndex+1} 行入口"></button>`;}
-function codeLineMarkup(n,line,linked){const entry=n.exposeEmbedded!==false?nestedEntries(n).find(entry=>entry.lineId===line.id):null;return `<div class="code-line ${linked.has(line.id)?'linked':''} ${entry?'inner-interface':''} ${focusedLine?.node===n.id&&focusedLine.line===line.id?'jump-focus':''}" data-line="${esc(line.id)}" ${entry?`data-entry-row="${esc(entry.id)}" style="--entry-color:${n.color}"`:''}>${entry?entryPort(n,entry):''}<span class="line-number">${line.index+1}</span><code>${line.hiddenCommentAnchor||line.hiddenBlankAnchor?`<span class="hidden-comment-anchor">${line.hiddenBlankAnchor?'空行':'注释已隐藏'} · 连线锚点</span>`:syntax(line.text,n,line.id)||' '}</code>${entry?`<span class="inline-entry-label">↳ ${esc(entry.name)}</span>`:''}<button class="line-port" data-line-port="${esc(line.id)}" aria-label="从第 ${line.index+1} 行连线" title="从第 ${line.index+1} 行发起调用"></button></div>`;}
+const foldLabel=fold=>`第 ${fold.start+2}–${fold.end} 行（${fold.end-fold.start-1} 行）`;
+function codeLineMarkup(n,line,linked,entries){
+  if(line.fold){
+    const fold=line.fold;
+    return `<button type="button" class="code-fold" data-code-fold="${fold.key}" aria-expanded="${fold.expanded}">${fold.expanded?'▾ 收起':'▸ 展开'} ${foldLabel(fold)}</button>`;
+  }
+  const entry=entries.get(line.id);
+  return `<div class="code-line ${linked.has(line.id)?'linked':''} ${entry?'inner-interface':''} ${focusedLine?.node===n.id&&focusedLine.line===line.id?'jump-focus':''}" data-line="${esc(line.id)}" ${entry?`data-entry-row="${esc(entry.id)}" style="--entry-color:${n.color}"`:''}>${entry?entryPort(n,entry):''}<span class="line-number">${line.index+1}</span><code>${line.hiddenCommentAnchor||line.hiddenBlankAnchor?`<span class="hidden-comment-anchor">${line.hiddenBlankAnchor?'空行':'注释已隐藏'} · 连线锚点</span>`:syntax(line.text,n,line.id)||' '}</code>${entry?`<span class="inline-entry-label">↳ ${esc(entry.name)}</span>`:''}<button class="line-port" data-line-port="${esc(line.id)}" aria-label="从第 ${line.index+1} 行连线" title="从第 ${line.index+1} 行发起调用"></button></div>`;
+}
 function render(){
   sanitizeSelection();
   $('project-title').value=doc.title;
@@ -129,62 +145,78 @@ function renderNodes(){
   $('nodes').innerHTML=doc.nodes.map(n=>{
     const p=n.positions[mode];const selectedNode=selected?.type==='node'&&selected.id===n.id;
     const linked=new Set(doc.edges.flatMap(e=>[...(e.from===n.id&&e.fromLine?[e.fromLine]:[]),...(e.to===n.id&&e.toLine?[e.toLine]:[])]));
+    const entries=new Map(n.exposeEmbedded===false?[]:nestedEntries(n).map(entry=>[entry.lineId,entry]));
     return `<article class="node ${mode==='code'?'code-node':''} ${selectedNode?'selected':''} ${multi.has(n.id)?'multi-selected':''} ${matches.has(n.id)?'':'dimmed'} ${pending?.node===n.id?'connect-source':''}" data-node="${esc(n.id)}" style="left:${p.x}px;top:${p.y}px;--node-color:${n.color}" aria-label="${blockTitle(n)} ${esc(n.name)}"><span class="node-coordinates">X ${Math.round(p.x)} · Y ${Math.round(p.y)}</span>
       <button class="port in" data-port="in" title="连接到 ${esc(n.name)}" aria-label="连接到 ${esc(n.name)}" ${readOnly?'disabled tabindex="-1"':''}></button><button class="port out" data-port="out" title="从 ${esc(n.name)} 连出" aria-label="从 ${esc(n.name)} 连出" ${readOnly?'disabled tabindex="-1"':''}></button>
       <div class="node-header"><span class="node-function-icon">${blockSymbol(n)}</span><span class="node-title" title="${esc(scopePath(doc,n))}">${esc(n.name)}${blockKind(n)==='function'?'()':''}</span>${n.parentId?`<span class="node-scope">in ${esc(scopePath(doc,nodeBy(n.parentId)))}</span>`:''}<button class="node-menu" data-edit-node="${esc(n.id)}" title="${readOnly?'查看':'编辑'}${blockTitle(n)}" aria-label="${readOnly?'查看':'编辑'} ${esc(n.name)}">⋯</button></div>
       ${n.file?`<div class="node-file" title="${esc(n.file)}">▱ ${esc(n.file)}</div>`:''}
       ${mode==='logic'&&n.exposeEmbedded!==false&&nestedEntries(n).length?`<div class="nested-entries">${nestedEntries(n).map(entry=>`<div class="nested-entry" data-entry-row="${esc(entry.id)}" style="--entry-color:${n.color}">${entryPort(n,entry)}<span class="entry-symbol">↳</span><button class="entry-name" data-entry-jump="${esc(n.id)}" data-entry-line="${esc(entry.lineId)}" title="定位 ${esc(entry.scope)} 的定义">${esc(entry.name)}()</button><span class="entry-badge">内部入口</span></div>`).join('')}</div>`:''}
-      ${mode==='code'?`<div class="code-lines">${canvasLines(n).map(line=>codeLineMarkup(n,line,linked)).join('')||'<div class="code-preview-empty">暂无可显示代码，双击编辑查看完整内容</div>'}</div>`:`<div class="node-description" title="${esc(n.description)}">${esc(n.description)||'添加一句函数说明…'}</div>`}
+      ${mode==='code'?`<div class="code-lines">${canvasLines(n).map(line=>codeLineMarkup(n,line,linked,entries)).join('')||'<div class="code-preview-empty">暂无可显示代码，双击编辑查看完整内容</div>'}</div>`:`<div class="node-description" title="${esc(n.description)}">${esc(n.description)||'添加一句函数说明…'}</div>`}
       <div class="node-tags">${n.tags.slice(0,5).map(t=>`<span class="node-tag">${esc(t)}</span>`).join('')||'<span class="node-tag">未分类</span>'}${n.tags.length>5?`<span class="node-tag">+${n.tags.length-5}</span>`:''}</div>
       <div class="node-foot"><button class="note-btn" data-note="${esc(n.id)}" title="展开或收起备注">${n.note?'▤ '+esc(n.note.split('\n')[0]):'＋ 添加备注'}</button><span>${mode==='code'?n.code.length+' lines':blockKind(n)==='function'?doc.edges.filter(e=>e.from===n.id&&e.type==='call').length+' 次调用':blockTitle(n)}</span></div>
       ${n.note?`<div class="node-note ${openNotes.has(n.id)?'open':''}">${esc(n.note)}</div>`:''}
     </article>`;
   }).join('');
+  const rects=[...$('nodes').children].map(el=>({
+    id:el.dataset.node,...nodeBy(el.dataset.node).positions[mode],w:el.offsetWidth,h:el.offsetHeight
+  }));
+  canvasRects=new Map(separateBlocks(rects).map(rect=>[rect.id,rect]));
+  for(const el of $('nodes').children)paintBlock(el,canvasRects.get(el.dataset.node));
   $('canvas-empty').hidden=doc.nodes.length>0;
   if(readOnly)$('nodes').querySelectorAll('[data-port],[data-line-port],[data-inner-entry]').forEach(button=>{button.disabled=true;button.tabIndex=-1;});
 }
-function measureNode(n){const el=nodeElement(n.id);return {x:n.positions[mode].x,y:n.positions[mode].y,w:mode==='code'?352:242,h:el?.offsetHeight||180};}
+function paintBlock(el,position){
+  el.style.left=position.x+'px';el.style.top=position.y+'px';
+  el.querySelector('.node-coordinates').textContent=`X ${Math.round(position.x)} · Y ${Math.round(position.y)}`;
+}
+function measureNode(n){return canvasRects.get(n.id)||{...n.positions[mode],w:mode==='code'?352:242,h:180};}
 function groupBounds(g){const members=g.members.map(nodeBy).filter(Boolean);if(!members.length)return {...g.positions[mode],w:330,h:190};const rs=members.map(measureNode),x=Math.min(...rs.map(r=>r.x))-24,y=Math.min(...rs.map(r=>r.y))-52;return {x,y,w:Math.max(...rs.map(r=>r.x+r.w))-x+24,h:Math.max(...rs.map(r=>r.y+r.h))-y+24};}
 function renderGroups(){
   $('groups').innerHTML=(doc.groups||[]).map(g=>{const r=groupBounds(g);return `<section class="group-frame ${selected?.type==='group'&&selected.id===g.id?'selected':''}" data-group="${esc(g.id)}" style="left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;--group-color:${g.color}" aria-label="分区 ${esc(g.name)}"><div class="group-header" title="移动模式下拖动标题，整体移动分区"><span>▧</span><strong>${esc(g.name)}</strong><small>${g.members.length} FUNCTIONS</small><button data-edit-group="${esc(g.id)}" aria-label="编辑分区 ${esc(g.name)}">⋯</button></div>${!g.members.length?'<div class="group-placeholder">在右侧勾选函数加入分区</div>':''}</section>`;}).join('');
 }
-function anchor(n,lineId,right){const r=measureNode(n);let y=r.y+28;const el=nodeElement(n.id);if(mode==='code'&&lineId&&el){const row=[...el.querySelectorAll('[data-line]')].find(e=>e.dataset.line===lineId);if(row)y=r.y+(row.getBoundingClientRect().top-el.getBoundingClientRect().top)/camera().z+12;}return {x:r.x+(right?r.w:0),y};}
+function anchorY(n,lineId){
+  const r=measureNode(n),el=nodeElement(n.id);
+  const row=mode==='code'&&lineId&&el?.querySelector(`[data-line="${CSS.escape(lineId)}"]`);
+  return row?r.y+(row.getBoundingClientRect().top-el.getBoundingClientRect().top)/camera().z+12:r.y+28;
+}
 function exposedAnchor(n,entryId){
   if(!entryId||n.exposeEmbedded===false)return null;
-  const el=nodeElement(n.id),row=el&&[...el.querySelectorAll('[data-entry-row]')].find(row=>row.dataset.entryRow===entryId);
-  if(!row)return null;const r=measureNode(n);return {x:r.x,y:r.y+(row.getBoundingClientRect().top-el.getBoundingClientRect().top+row.getBoundingClientRect().height/2)/camera().z};
+  const el=nodeElement(n.id),row=el?.querySelector(`[data-entry-row="${CSS.escape(entryId)}"]`);
+  if(!row)return null;
+  const r=measureNode(n),bounds=row.getBoundingClientRect();
+  return {y:r.y+(bounds.top-el.getBoundingClientRect().top+bounds.height/2)/camera().z};
 }
-function edgeGeometry(e){
+function edgeGeometry(e,cache){
+  if(cache.has(e.id))return cache.get(e.id);
   const a=nodeBy(e.from),b=nodeBy(e.to);if(!a||!b)return null;
-  if(e.type==='return'){
-    const call=e.callId?edgeBy(e.callId):doc.edges.find(c=>c.type==='call'&&c.from===e.to&&c.to===e.from);
-    if(call?.type==='call'){
-      const base=edgeGeometry(call),dir=base.dir;
-      const peers=doc.edges.filter(r=>r.type==='return'&&(r.callId===call.id||(!r.callId&&r.from===e.from&&r.to===e.to))),offset=14+Math.max(0,peers.findIndex(r=>r.id===e.id))*12;
-      if(mode==='code'){
-        const fromEntry=exposedAnchor(a,e.fromEntry),toEntry=exposedAnchor(b,e.toEntry);
-        const startDir=fromEntry?-1:-(base.endDir??dir),endDir=toEntry?1:-(base.startDir??dir);
-        const start=fromEntry||anchor(a,e.fromLine,startDir>0),end=toEntry||anchor(b,e.toLine,endDir<0);
-        const segments=routeBlocks(start,end,{source:measureNode(a),target:measureNode(b),dir:startDir,endDir,offset});
-        return {d:pathFor(segments),segments,dir,startDir,endDir};
-      }
-      const segments=returnAlong(base.segments,{offset});return {d:pathFor(segments),segments,dir};
-    }
+  const source=measureNode(a),target=measureNode(b);
+  const obstacles=[...canvasRects.values()].filter(rect=>rect!==source&&rect!==target);
+  const fromEntry=exposedAnchor(a,e.fromEntry),toEntry=exposedAnchor(b,e.toEntry);
+  const fromY=fromEntry?.y??anchorY(a,e.fromLine),toY=toEntry?.y??anchorY(b,e.toLine);
+  const call=e.type==='return'&&(e.callId?edgeBy(e.callId):doc.edges.find(c=>c.type==='call'&&c.from===e.to&&c.to===e.from));
+  let route;
+  if(call?.type==='call'){
+    const base=edgeGeometry(call,cache);
+    const startDir=fromEntry?-1:-base.endDir,endDir=toEntry?1:-base.startDir;
+    const peers=doc.edges.filter(r=>r.type==='return'&&(r.callId===call.id||(!r.callId&&r.from===e.from&&r.to===e.to)));
+    const offset=10+Math.max(0,peers.findIndex(r=>r.id===e.id))*10;
+    const start={x:source.x+(startDir>0?source.w:0),y:fromY+(mode==='logic'&&!fromEntry?Math.min(offset,22):0)};
+    const end={x:target.x+(endDir<0?target.w:0),y:toY+(mode==='logic'&&!toEntry?Math.min(offset,22):0)};
+    route={segments:routeBlocks(start,end,{source,target,dir:startDir,endDir,offset,obstacles}),startDir,endDir};
+  }else{
+    const parallel=doc.edges.filter(v=>v.from===e.from&&v.to===e.to&&v.type===e.type);
+    const offset=parallel.findIndex(v=>v.id===e.id)*14;
+    route=routeConnection(source,target,{fromY,toY,fromLeft:!!fromEntry,toLeft:!!toEntry,offset,obstacles});
   }
-  const exposed=exposedAnchor(b,e.toEntry),fromEntry=exposedAnchor(a,e.fromEntry);
-  const ar=measureNode(a),br=measureNode(b);const forward=br.x>=ar.x;
-  const s=fromEntry||anchor(a,e.fromLine,forward),t=exposed||anchor(b,e.toLine,!forward);
-  const parallel=doc.edges.filter(v=>v.from===e.from&&v.to===e.to&&v.type===e.type),index=parallel.findIndex(v=>v.id===e.id),offset=index*22;
-  if(a.id===b.id&&!exposed){const x=ar.x+ar.w+65+offset,segments=[{from:{x:ar.x+ar.w,y:s.y},c1:{x,y:s.y-70},c2:{x:x+30,y:s.y+110},to:{x:ar.x+ar.w,y:s.y+80}}];return {d:pathFor(segments),segments,dir:1};}
-  const dir=forward?1:-1;
-  const startDir=fromEntry?-1:dir,endDir=exposed?1:dir;
-  const segments=routeBlocks(s,t,{source:ar,target:br,dir:startDir,endDir,offset});return {d:pathFor(segments),segments,dir,startDir,endDir};
+  const result={...route,d:pathFor(route.segments)};
+  cache.set(e.id,result);
+  return result;
 }
 function drawEdges(){
-  const matches=visible();
+  const matches=visible(),geometry=new Map();
   const chosen=selected?.type==='edge'?edgeBy(selected.id):null,callId=chosen?.type==='return'?chosen.callId:chosen?.id;
   const defs=`<defs><marker id="arrow-call" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="#71c9ef" stroke-width="1.3"/></marker><marker id="arrow-return" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="#b5a1e7" stroke-width="1.3"/></marker></defs>`;
-  $('edges').innerHTML=defs+doc.edges.map(e=>{const g=edgeGeometry(e);if(!g)return '';return `<g class="edge ${e.type} ${selected?.type==='edge'&&selected.id===e.id?'selected':''} ${callId&&(e.id===callId||e.callId===callId)?'related':''} ${matches.has(e.from)&&matches.has(e.to)?'':'dimmed'}" data-edge="${esc(e.id)}" role="button" tabindex="0" aria-label="${esc(endpointTitle(e,'from'))} ${e.type==='call'?'调用':'返回到'} ${esc(endpointTitle(e,'to'))}"><path class="hit-path" d="${g.d}"/><path class="visible-path" d="${g.d}" marker-end="url(#arrow-${e.type})"/></g>`;}).join('');
+  $('edges').innerHTML=defs+doc.edges.map(e=>{const g=edgeGeometry(e,geometry);if(!g)return '';return `<g class="edge ${e.type} ${selected?.type==='edge'&&selected.id===e.id?'selected':''} ${callId&&(e.id===callId||e.callId===callId)?'related':''} ${matches.has(e.from)&&matches.has(e.to)?'':'dimmed'}" data-edge="${esc(e.id)}" role="button" tabindex="0" aria-label="${esc(endpointTitle(e,'from'))} ${e.type==='call'?'调用':'返回到'} ${esc(endpointTitle(e,'to'))}"><path class="hit-path" d="${g.d}"/><path class="visible-path" d="${g.d}" marker-end="url(#arrow-${e.type})"/></g>`;}).join('');
 }
 function applyCamera(){const c=camera();$('scene').style.transform=`translate(${c.x}px,${c.y}px) scale(${c.z})`;$('zoom-value').textContent=Math.round(c.z*100)+'%';$('viewport').style.backgroundPosition=`${c.x}px ${c.y}px`;$('viewport').style.backgroundSize=`${20*c.z}px ${20*c.z}px`;}
 function fit(){
@@ -196,7 +228,14 @@ function fit(){
   cameras[mode]={z,x:(w-(maxX-minX)*z)/2-minX*z,y:top-minY*z};applyCamera();drawEdges();save();
 }
 function zoom(factor,point){const c=camera(),rect=$('viewport').getBoundingClientRect();const p=point||{x:rect.width/2,y:rect.height/2};const next=Math.max(.2,Math.min(2,c.z*factor));c.x=p.x-(p.x-c.x)*next/c.z;c.y=p.y-(p.y-c.y)*next/c.z;c.z=next;applyCamera();save();}
-function centerNode(id){const n=nodeBy(id);if(!n)return;const r=measureNode(n),c=camera(),w=$('viewport').clientWidth,h=$('viewport').clientHeight;c.x=w/2-(r.x+r.w/2)*c.z;c.y=mobileLayout.matches?Math.max(16,(h-110-r.h*c.z)/2)-r.y*c.z:h/2-(r.y+r.h/2)*c.z;applyCamera();save();}
+function centerNode(id,line=null){
+  const n=nodeBy(id);if(!n)return;
+  const r=measureNode(n),c=camera(),w=$('viewport').clientWidth,h=$('viewport').clientHeight;
+  const room=h-(mobileLayout.matches?110:0);
+  c.x=w/2-(r.x+r.w/2)*c.z;
+  c.y=mode==='code'&&line?room/2-anchorY(n,line)*c.z:Math.max(16,(room-r.h*c.z)/2)-r.y*c.z;
+  applyCamera();save();
+}
 function renderInnerMarkers(){
   const list=$('embedded-list');if(!list)return;const lines=editorLines||[];
   list.innerHTML=innerDraft.map((entry,index)=>`<div class="inner-marker" data-inner-marker="${esc(entry.id)}"><label>函数名<input data-inner-name="${esc(entry.id)}" aria-label="内嵌函数名称 ${index+1}" value="${esc(entry.name)}" maxlength="100" placeholder="例如 internal_demuxer" required/></label><label class="inner-marker-line">行号<input data-inner-line="${esc(entry.id)}" aria-label="内嵌函数行号 ${index+1}" type="number" min="1" max="${lines.length}" value="${lines.findIndex(line=>line.id===entry.lineId)+1||''}" required/></label><button type="button" data-inner-locate="${esc(entry.id)}" title="定位到代码行" aria-label="定位内嵌函数 ${index+1}">⌖</button><button type="button" data-inner-remove="${esc(entry.id)}" title="移除入口标记，保留代码" aria-label="移除内嵌函数标记 ${index+1}">×</button></div>`).join('')||'<small>添加行号和名称即可，不复制或生成代码。</small>';
@@ -206,13 +245,13 @@ function renderInnerMarkers(){
   if(readOnly){list.querySelectorAll('input').forEach(input=>input.readOnly=true);list.querySelectorAll('[data-inner-remove]').forEach(button=>button.hidden=true);}
   list.querySelectorAll('[data-inner-locate]').forEach(button=>button.addEventListener('click',()=>{const entry=innerDraft.find(entry=>entry.id===button.dataset.innerLocate),index=lines.findIndex(line=>line.id===entry.lineId);if(index<0){toast('对应代码行已删除，请重新选择行号');return;}const offset=lines.slice(0,index).reduce((total,line)=>total+line.text.length+1,0);codeEditor?.reveal(offset,offset+lines[index].text.length);}));
 }
-function mountCodeEditor(){const panel=$('inspector'),host=panel.querySelector('.cm-host'),source=panel.querySelector('textarea[name="code"]');if(codeEditor||!host||!source)return;const form=source.closest('form');codeEditor=createCodeEditor({parent:host,doc:source.value,language:form.elements.language.value,indentSize:Number(form.elements.indentSize.value),readOnly,onChange:value=>{source.value=value;try{editorLines=reconcileLines(editorLines||nodeBy(selected.id).code,value);renderInnerMarkers();}catch{}}});form.elements.language.addEventListener('change',()=>codeEditor?.setLanguage(form.elements.language.value));form.elements.indentSize.addEventListener('change',()=>codeEditor?.setIndentSize(Number(form.elements.indentSize.value)));renderInnerMarkers();}
+function mountCodeEditor(){const panel=$('inspector'),host=panel.querySelector('.cm-host'),source=panel.querySelector('textarea[name="code"]');if(codeEditor||!host||!source)return;const form=source.closest('form');codeEditor=createCodeEditor({parent:host,doc:source.value,language:form.elements.language.value,indentSize:Number(form.elements.indentSize.value),readOnly,onChange:(value,ranges)=>{source.value=value;try{editorLines=reconcileLines(editorLines||nodeBy(selected.id).code,value,ranges);renderInnerMarkers();}catch{}}});form.elements.language.addEventListener('change',()=>codeEditor?.setLanguage(form.elements.language.value));form.elements.indentSize.addEventListener('change',()=>codeEditor?.setIndentSize(Number(form.elements.indentSize.value)));renderInnerMarkers();}
 function openInspector(){if(mobileLayout.matches&&document.querySelector('.app').classList.contains('mobile-sidebar-open'))mobileSidebar(false);finishKeyMotion();if(selected&&!$('inspector').open)$('inspector').showModal();mountCodeEditor();codeEditor?.measure();}
 function select(type,id,edit=true){finishKeyMotion();selected={type,id};multi.clear();$('group-btn').textContent='▧ 分区';$('edit-selection').disabled=false;renderSidebar();for(const el of $('nodes').children){el.classList.toggle('selected',type==='node'&&el.dataset.node===id);el.classList.remove('multi-selected');for(const row of el.querySelectorAll('[data-line]'))row.classList.toggle('jump-focus',focusedLine?.node===el.dataset.node&&focusedLine.line===row.dataset.line);}for(const el of $('groups').children)el.classList.toggle('selected',type==='group'&&el.dataset.group===id);renderInspector();drawEdges();if(edit)openInspector();}
-function jumpToNode(id,line=null){if(!nodeBy(id))return;if($('inspector').open)$('inspector').close();if(isConnecting())setTool('select');focusedLine=line?{node:id,line}:null;select('node',id,false);centerNode(id);$('viewport').focus();toast('已定位到 '+nodeBy(id).name+(mode==='code'&&line?' 的对应代码行':''));}
+function jumpToNode(id,line=null){if(!nodeBy(id))return;if($('inspector').open)$('inspector').close();if(isConnecting())setTool('select');focusedLine=line?{node:id,line}:null;if(mode==='code'&&line){renderNodes();renderGroups();}select('node',id,false);centerNode(id,line);$('viewport').focus();toast('已定位到 '+nodeBy(id).name+(mode==='code'&&line?' 的对应代码行':''));}
 function showJumpTargets(ids){const dialog=$('jump-dialog');dialog.innerHTML=`<div class="dialog-heading"><span class="eyebrow">JUMP TO FUNCTION</span><button id="close-jump" class="icon-btn" aria-label="关闭目标选择">×</button></div><h2>选择要定位的函数</h2><p>找到多个同名函数，可根据作用域和所属文件选择。</p>${ids.map(id=>{const n=nodeBy(id);return `<button class="export-option" data-jump-choice="${esc(id)}"><div><strong>${esc(scopePath(doc,n))}</strong><small>${esc(n.file||'未指定文件')}</small></div><span>→</span></button>`;}).join('')}`;dialog.querySelector('#close-jump').addEventListener('click',()=>dialog.close());dialog.querySelectorAll('[data-jump-choice]').forEach(b=>b.addEventListener('click',()=>{dialog.close();jumpToNode(b.dataset.jumpChoice);}));dialog.showModal();}
 function labelField(label,name,value,{textarea=false,placeholder='',code=false,hint=''}={}){
-  if(code){const language=nodeBy(selected.id)?.language||'javascript',indentSize=nodeBy(selected.id)?.indentSize||(['javascript','typescript','json'].includes(language)?2:4);return `<div class="field code-field"><div class="field-label"><span>〈/〉代码</span><select name="language" class="language-select" aria-label="代码类型">${Object.entries(LANGUAGES).map(([key,title])=>`<option value="${key}" ${key===language?'selected':''}>${title}</option>`).join('')}</select><select name="indentSize" class="indent-select" aria-label="缩进空格数">${[2,4,8].map(size=>`<option value="${size}" ${size===indentSize?'selected':''}>${size} 空格</option>`).join('')}</select></div><div class="code-editor-wrap"><div class="cm-host"></div><textarea name="code" hidden aria-hidden="true">${esc(value)}</textarea></div></div>`;}
+  if(code){const language=nodeBy(selected.id)?.language||'javascript',indentSize=nodeBy(selected.id)?.indentSize||(['javascript','typescript','json'].includes(language)?2:4);return `<div class="field code-field"><div class="field-label"><span>〈/〉代码</span><select name="language" class="language-select" aria-label="代码类型">${Object.entries(LANGUAGES).map(([key,title])=>`<option value="${key}" ${key===language?'selected':''}>${title}</option>`).join('')}</select><select name="indentSize" class="indent-select" aria-label="缩进空格数">${[2,4,8].map(size=>`<option value="${size}" ${size===indentSize?'selected':''}>${size} 空格</option>`).join('')}</select></div><div class="code-editor-wrap"><div class="cm-host"></div><textarea name="code" hidden aria-hidden="true">\n${esc(value)}</textarea></div></div>`;}
   return `<label class="field"><span class="field-label">${label}${hint?`<small>${hint}</small>`:''}</span>${textarea?`<textarea name="${name}" placeholder="${esc(placeholder)}">${esc(value)}</textarea>`:`<input name="${name}" value="${esc(value)}" placeholder="${esc(placeholder)}" maxlength="${name==='name'?100:name==='file'?500:name==='tags'?800:5000}"/>`}</label>`;
 }
 function inspectorTitle(label,code){return `<div class="inspector-title">${label}<span>${code}</span>${selected?.type==='node'?'<button id="locate-node" class="text-btn">⌖ 定位函数</button>':''}<button class="icon-btn" id="close-inspector" title="关闭属性" aria-label="关闭属性">×</button></div>`;}
@@ -234,7 +273,7 @@ function renderInspector(){
       ${labelField('功能说明','description',n.description,{placeholder:'一句话说明函数的职责'})}
       ${labelField('所属文件','file',n.file||'',{placeholder:'例如 src/auth/login.ts',hint:'相对项目路径'})}
       ${blockKind(n)==='function'?`<section class="field nested-functions"><div class="field-label">内嵌函数入口<button type="button" id="add-nested-function">＋ 添加</button></div><p>行号控制左侧接口，名称用于检索与跳转。</p><div id="embedded-list"></div><label class="nested-entry-option"><input type="checkbox" name="exposeEmbedded" ${n.exposeEmbedded!==false?'checked':''}/><span>在画布左侧显示入口</span></label></section>`:''}
-      <div class="field"><span class="field-label">左上角坐标<small>${canMoveBlocks()?(layoutSynced()?'逻辑 / 代码模式共用 · px':(mode==='code'?'仅代码模式 · px':'仅逻辑模式 · px')):'切换移动模式可调整'}</small></span><div class="coordinate-inputs"><label>X<input name="posX" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].x)}"/></label><label>Y<input name="posY" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].y)}"/></label></div></div>
+      <div class="field"><span class="field-label">左上角坐标<small>${Math.round(measureNode(n).y)!==Math.round(n.positions[mode].y)?'避让后 Y '+Math.round(measureNode(n).y)+' · ':''}${canMoveBlocks()?(layoutSynced()?'逻辑 / 代码模式共用 · px':(mode==='code'?'仅代码模式 · px':'仅逻辑模式 · px')):'切换移动模式可调整'}</small></span><div class="coordinate-inputs"><label>X<input name="posX" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].x)}"/></label><label>Y<input name="posY" ${canMoveBlocks()?'':'readonly'} type="number" step="1" min="-100000" max="100000" value="${Math.round(n.positions[mode].y)}"/></label></div></div>
       <label class="field"><span class="field-label">所属分区</span><select name="groupId"><option value="">不属于任何分区</option>${(doc.groups||[]).map(g=>`<option value="${esc(g.id)}" ${g.members.includes(n.id)?'selected':''}>${esc(g.name)}</option>`).join('')}</select></label>
       <label class="field"><span class="field-label">父函数 / 嵌套作用域<small>定义关系，不自动连调用线</small></span><select name="parentId"><option value="">文件级定义</option>${doc.nodes.filter(p=>blockKind(p)==='function'&&p.id!==n.id&&canParent(doc,n.id,p.id)).map(p=>`<option value="${esc(p.id)}" ${n.parentId===p.id?'selected':''}>${esc(scopePath(doc,p))}</option>`).join('')}</select></label>
       <div class="field"><span class="field-label">标记颜色</span><div class="color-options">${COLORS.map(c=>`<button type="button" class="color-dot ${n.color===c?'active':''}" style="--swatch:${c}" data-color="${c}" aria-label="选择颜色 ${c}"></button>`).join('')}</div></div>
@@ -346,8 +385,9 @@ function exportSvg(){
   const chosen=doc.nodes.filter(n=>visible().has(n.id));if(!chosen.length){toast('当前没有匹配的函数，请先清除筛选');return;}
   const rects=[...chosen.map(measureNode),...(doc.groups||[]).filter(g=>g.members.some(id=>chosen.some(n=>n.id===id))).map(groupBounds)],minX=Math.min(...rects.map(r=>r.x))-100,minY=Math.min(...rects.map(r=>r.y))-120,maxX=Math.max(...rects.map(r=>r.x+r.w))+100,maxY=Math.max(...rects.map(r=>r.y+r.h))+140;
   const ids=new Set(chosen.map(n=>n.id));
-  const paths=doc.edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).map(e=>{const g=edgeGeometry(e);return `<g><path d="${g.d}" fill="none" stroke="${e.type==='call'?'#71c9ef':'#b5a1e7'}" stroke-width="1.7" ${e.type==='return'?'stroke-dasharray="6 5"':''} marker-end="url(#arrow)"/></g>`;}).join('');
-  const blocks=chosen.map(n=>{const r=measureNode(n);return `<g transform="translate(${r.x} ${r.y})"><rect width="${r.w}" height="${r.h}" rx="9" fill="#192536" stroke="${n.color}"/><text x="17" y="32" fill="${n.color}" font-size="14">ƒ  ${esc(n.name)}()</text><path d="M0 56H${r.w}" stroke="#414956"/>${mode==='code'?canvasLines(n).map((l,i)=>`<text x="14" y="${83+i*24}" fill="#c2cbd7" font-size="10" xml:space="preserve">${String(l.index+1).padStart(2,' ')}  ${esc((l.hiddenCommentAnchor?'注释已隐藏 · 连线锚点':l.hiddenBlankAnchor?'空行 · 连线锚点':l.text).slice(0,51))}</text>`).join(''):`<text x="16" y="81" font-size="11" fill="#a6b1c0">${esc(n.description.slice(0,25))}</text>`}<text x="16" y="${r.h-39}" font-size="10" fill="${n.color}">${esc(n.tags.join(' · ').slice(0,45))}</text><text x="16" y="${r.h-12}" font-size="9" fill="#8f9cae">${esc((n.note?'▤ '+n.note.split('\n')[0]:'无备注').slice(0,40))}</text></g>`;}).join('');
+  const geometry=new Map();
+  const paths=doc.edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).map(e=>{const g=edgeGeometry(e,geometry);return `<g><path d="${g.d}" fill="none" stroke="${e.type==='call'?'#71c9ef':'#b5a1e7'}" stroke-width="1.7" ${e.type==='return'?'stroke-dasharray="6 5"':''} marker-end="url(#arrow)"/></g>`;}).join('');
+  const blocks=chosen.map(n=>{const r=measureNode(n);return `<g transform="translate(${r.x} ${r.y})"><rect width="${r.w}" height="${r.h}" rx="9" fill="#192536" stroke="${n.color}"/><text x="17" y="32" fill="${n.color}" font-size="14">ƒ  ${esc(n.name)}()</text><path d="M0 56H${r.w}" stroke="#414956"/>${mode==='code'?canvasLines(n).map((l,i)=>`<text x="14" y="${83+i*24}" fill="#c2cbd7" font-size="10" xml:space="preserve">${l.fold?'⋯':String(l.index+1).padStart(2,' ')}  ${esc((l.fold?foldLabel(l.fold):l.hiddenCommentAnchor?'注释已隐藏 · 连线锚点':l.hiddenBlankAnchor?'空行 · 连线锚点':l.text).slice(0,51))}</text>`).join(''):`<text x="16" y="81" font-size="11" fill="#a6b1c0">${esc(n.description.slice(0,25))}</text>`}<text x="16" y="${r.h-39}" font-size="10" fill="${n.color}">${esc(n.tags.join(' · ').slice(0,45))}</text><text x="16" y="${r.h-12}" font-size="9" fill="#8f9cae">${esc((n.note?'▤ '+n.note.split('\n')[0]:'无备注').slice(0,40))}</text></g>`;}).join('');
   const groupShapes=(doc.groups||[]).filter(g=>g.members.some(id=>ids.has(id))).map(g=>{const r=groupBounds(g);return `<g><rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="14" fill="${g.color}" fill-opacity=".03" stroke="${g.color}" stroke-opacity=".5" stroke-dasharray="6 5"/><text x="${r.x+15}" y="${r.y+22}" fill="${g.color}" font-size="11">${esc(g.name)}</text></g>`;}).join('');
   download(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${maxX-minX} ${maxY-minY}" width="${maxX-minX}" height="${maxY-minY}" style="background:#0c1220;font-family:Consolas,'Microsoft YaHei',monospace"><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#71c9ef"/></marker></defs><rect x="${minX}" y="${minY}" width="${maxX-minX}" height="${maxY-minY}" fill="#0c1220"/><text x="${minX+30}" y="${minY+35}" fill="#e5edf8" font-size="16">${esc(doc.title)} · ${mode==='logic'?'逻辑模式':'代码模式'}</text>${groupShapes}${paths}${blocks}</svg>`,'image/svg+xml;charset=utf-8','svg');toast('当前视图已导出为 SVG');
 }
@@ -432,6 +472,15 @@ $('import-file').addEventListener('change',async e=>{const file=e.target.files?.
 $('nodes').addEventListener('click',e=>{
   if(suppressClick)return;
   const nEl=e.target.closest('[data-node]');if(!nEl)return;const id=nEl.dataset.node;
+  const fold=e.target.closest('[data-code-fold]');
+  if(fold){
+    const node=nodeBy(id),key=fold.dataset.codeFold,expanded=expandedFolds.get(node.code)||new Set();
+    if(expanded.has(key))expanded.delete(key);else expanded.add(key);
+    expandedFolds.set(node.code,expanded);
+    renderNodes();renderGroups();drawEdges();
+    nodeElement(id).querySelector(`[data-code-fold="${key}"]`)?.focus({preventScroll:true});
+    return;
+  }
   const row=e.target.closest('[data-line]'),line=row?.dataset.line||null;
   const entry=e.target.closest('[data-inner-entry]');if(entry){e.stopPropagation();connect(entry.dataset.innerEntry,entry.dataset.innerLine,entry.dataset.innerId);return;}
   const entryJump=e.target.closest('[data-entry-jump]');if(entryJump){if(isConnecting()){const model=nestedEntries(nEl?nodeBy(id):null).find(entry=>entry.lineId===entryJump.dataset.entryLine);connect(id,model?.lineId,model?.id);}else{setMode('code');jumpToNode(entryJump.dataset.entryJump,entryJump.dataset.entryLine);}return;}
@@ -446,7 +495,7 @@ $('nodes').addEventListener('click',e=>{
   select('node',id,false);
 });
 $('edges').addEventListener('click',e=>{if(suppressClick)return;const edge=e.target.closest('[data-edge]');if(edge){if(e.ctrlKey||e.metaKey){const model=edgeBy(edge.dataset.edge);jumpToNode(model.to,model.toLine);}else if(!isConnecting())select('edge',edge.dataset.edge);}});
-$('nodes').addEventListener('dblclick',e=>{if(suppressClick||isConnecting()||performance.now()-lastConnectionAt<450)return;const n=e.target.closest('[data-node]');if(!n||e.ctrlKey||e.metaKey||e.target.closest('[data-note],[data-port],[data-line-port],[data-inner-entry],[data-entry-jump]'))return;const id=n.dataset.node;if(tagEditing&&tags.length===1){const tag=tags[0],node=nodeBy(id);if(node.tags.includes(tag)){toast(node.name+' 已属于「'+tag+'」');return;}try{if(node.tags.length>=20)throw Error('一个函数最多支持 20 个标签');commit(()=>{assignNodeTag(doc,id,tag);selected={type:'node',id};});toast('已将 '+node.name+' 加入「'+tag+'」');}catch(err){toast(err.message);}return;}select('node',id);});
+$('nodes').addEventListener('dblclick',e=>{if(suppressClick||isConnecting()||performance.now()-lastConnectionAt<450)return;const n=e.target.closest('[data-node]');if(!n||e.ctrlKey||e.metaKey||e.target.closest('[data-note],[data-port],[data-line-port],[data-inner-entry],[data-entry-jump],[data-code-fold]'))return;const id=n.dataset.node;if(tagEditing&&tags.length===1){const tag=tags[0],node=nodeBy(id);if(node.tags.includes(tag)){toast(node.name+' 已属于「'+tag+'」');return;}try{if(node.tags.length>=20)throw Error('一个函数最多支持 20 个标签');commit(()=>{assignNodeTag(doc,id,tag);selected={type:'node',id};});toast('已将 '+node.name+' 加入「'+tag+'」');}catch(err){toast(err.message);}return;}select('node',id);});
 $('edges').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const edge=e.target.closest('[data-edge]');if(edge){e.preventDefault();select('edge',edge.dataset.edge);}}});
 $('inspector').addEventListener('cancel',()=>{selected=null;renderSidebar();renderNodes();drawEdges();});
 $('inspector').addEventListener('submit',event=>{if(readOnly){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
@@ -459,18 +508,21 @@ $('viewport').addEventListener('pointerdown',e=>{
   const group=e.target.closest('[data-group]');
   const touchPan=e.pointerType==='touch'&&!isConnecting()&&!e.target.closest('button')&&((n&&(readOnly||!e.target.closest('.node-header')))||(group&&(readOnly||!e.target.closest('.group-header')))||e.target.closest('[data-edge]'));
   if(touchPan){drag={type:'pan',startX:e.clientX,startY:e.clientY,original:{x:camera().x,y:camera().y},moved:false};}
-  else if(n){if(!canMoveBlocks()||e.ctrlKey||e.metaKey||e.shiftKey||pending||!e.target.closest('.node-header')||e.target.closest('[data-edit-node]'))return;const model=nodeBy(n.dataset.node);drag={type:'node',id:model.id,startX:e.clientX,startY:e.clientY,original:{...model.positions[mode]},before:clone(doc),moved:false};}
-  else if(group){if(!canMoveBlocks()||pending||e.ctrlKey||e.metaKey||e.shiftKey||!e.target.closest('.group-header')||e.target.closest('[data-edit-group]'))return;const g=groupBy(group.dataset.group);drag={type:'group',id:g.id,startX:e.clientX,startY:e.clientY,original:clone(g.positions[mode]),originalMembers:g.members.map(id=>({id,position:{...nodeBy(id).positions[mode]}})),before:clone(doc),moved:false};}
+  else if(n){if(!canMoveBlocks()||e.ctrlKey||e.metaKey||e.shiftKey||pending||!e.target.closest('.node-header')||e.target.closest('[data-edit-node]'))return;const id=n.dataset.node;drag={type:'node',id,startX:e.clientX,startY:e.clientY,original:{...blockPosition({type:'node',id})},before:clone(doc),moved:false};}
+  else if(group){if(!canMoveBlocks()||pending||e.ctrlKey||e.metaKey||e.shiftKey||!e.target.closest('.group-header')||e.target.closest('[data-edit-group]'))return;const g=groupBy(group.dataset.group);drag={type:'group',id:g.id,startX:e.clientX,startY:e.clientY,original:{...g.positions[mode]},before:clone(doc),moved:false};}
   else if(!e.target.closest('[data-edge]')){drag={type:'pan',startX:e.clientX,startY:e.clientY,original:{x:camera().x,y:camera().y},moved:false};}
   if(drag){drag.pointerId=e.pointerId;e.preventDefault();window.getSelection()?.removeAllRanges();$('viewport').focus({preventScroll:true});}
 });
 $('viewport').addEventListener('pointermove',e=>{
   if(!drag||drag.pointerId!==e.pointerId)return;const dx=e.clientX-drag.startX,dy=e.clientY-drag.startY;if(Math.abs(dx)+Math.abs(dy)>4)drag.moved=true;if(!drag.moved)return;if(!$('viewport').hasPointerCapture(e.pointerId)){$('viewport').setPointerCapture(e.pointerId);$('viewport').classList.add('panning');}
   if(drag.type==='pan'){camera().x=drag.original.x+dx;camera().y=drag.original.y+dy;applyCamera();}
-  else if(drag.type==='node'){const n=nodeBy(drag.id);setBlockPosition(n,{x:snapValue(drag.original.x+dx/camera().z),y:snapValue(drag.original.y+dy/camera().z)});const el=nodeElement(n.id);el.style.left=n.positions[mode].x+'px';el.style.top=n.positions[mode].y+'px';el.querySelector('.node-coordinates').textContent=`X ${n.positions[mode].x} · Y ${n.positions[mode].y}`;cancelAnimationFrame(renderFrame);renderFrame=requestAnimationFrame(()=>{renderGroups();drawEdges();});}
-  else{const gx=snapValue(dx/camera().z),gy=snapValue(dy/camera().z),g=groupBy(drag.id);setBlockPosition(g,{x:drag.original.x+gx,y:drag.original.y+gy});for(const m of drag.originalMembers){setBlockPosition(nodeBy(m.id),{x:m.position.x+gx,y:m.position.y+gy});const el=nodeElement(m.id);el.style.left=nodeBy(m.id).positions[mode].x+'px';el.style.top=nodeBy(m.id).positions[mode].y+'px';el.querySelector('.node-coordinates').textContent=`X ${Math.round(nodeBy(m.id).positions[mode].x)} · Y ${Math.round(nodeBy(m.id).positions[mode].y)}`;}cancelAnimationFrame(renderFrame);renderFrame=requestAnimationFrame(()=>{renderGroups();drawEdges();});}
+  else{
+    const p=blockPosition(drag),target={x:snapValue(drag.original.x+dx/camera().z),y:snapValue(drag.original.y+dy/camera().z)};
+    drag.changed=moveBlocks(drag,{x:target.x-p.x,y:target.y-p.y})||drag.changed;
+    cancelAnimationFrame(renderFrame);renderFrame=requestAnimationFrame(()=>{renderGroups();drawEdges();});
+  }
 });
-function endDrag(e){if(!drag||drag.pointerId!==e.pointerId)return;const d=drag;drag=null;$('viewport').classList.remove('panning');if($('viewport').hasPointerCapture(e.pointerId))$('viewport').releasePointerCapture(e.pointerId);if(d.moved){suppressClick=true;setTimeout(()=>suppressClick=false,50);if(d.type!=='pan'){history.push(d.before);if(history.length>60)history.shift();future=[];$('undo-btn').disabled=false;$('redo-btn').disabled=true;if(d.type==='node'&&selected?.type==='node'&&selected.id===d.id){const form=$('node-form');if(form){form.elements.posX.value=Math.round(nodeBy(d.id).positions[mode].x);form.elements.posY.value=Math.round(nodeBy(d.id).positions[mode].y);}}}save();}else if(e.type==='pointercancel'){return;}else if(d.type==='pan'&&!isConnecting()){selected=null;multi.clear();render();}else if(d.type==='node'||d.type==='group'){select(d.type,d.id,false);}}
+function endDrag(e){if(!drag||drag.pointerId!==e.pointerId)return;const d=drag;drag=null;$('viewport').classList.remove('panning');if($('viewport').hasPointerCapture(e.pointerId))$('viewport').releasePointerCapture(e.pointerId);if(d.moved){suppressClick=true;setTimeout(()=>suppressClick=false,50);if(d.changed){renderNodes();renderGroups();drawEdges();history.push(d.before);if(history.length>60)history.shift();future=[];$('undo-btn').disabled=false;$('redo-btn').disabled=true;if(d.type==='node'&&selected?.type==='node'&&selected.id===d.id){const form=$('node-form');if(form){form.elements.posX.value=Math.round(nodeBy(d.id).positions[mode].x);form.elements.posY.value=Math.round(nodeBy(d.id).positions[mode].y);}}}save();}else if(e.type==='pointercancel'){return;}else if(d.type==='pan'&&!isConnecting()){selected=null;multi.clear();render();}else if(d.type==='node'||d.type==='group'){select(d.type,d.id,false);}}
 $('viewport').addEventListener('pointerup',endDrag);$('viewport').addEventListener('pointercancel',endDrag);
 installPinchNavigation($('viewport'),{
   getCamera:camera,paint:applyCamera,save,
@@ -478,33 +530,67 @@ installPinchNavigation($('viewport'),{
   suppressClick(){suppressClick=true;setTimeout(()=>suppressClick=false,450);}
 });
 $('viewport').addEventListener('wheel',e=>{if(e.target.closest('.inspector'))return;e.preventDefault();const r=$('viewport').getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0013),{x:e.clientX-r.left,y:e.clientY-r.top});},{passive:false});
-function keyPositions(subject){if(subject.type==='pan')return [camera()];if(subject.type==='node')return [nodeBy(subject.id).positions[mode]];const g=groupBy(subject.id);return [g.positions[mode],...g.members.map(id=>nodeBy(id).positions[mode])];}
-function paintKeyMotion(){if(!keyMotion)return;if(keyMotion.subject.type==='pan'){applyCamera();return;}const group=keyMotion.subject.type==='group'?groupBy(keyMotion.subject.id):null;if(group)setBlockPosition(group,group.positions[mode]);const ids=group?group.members:[keyMotion.subject.id];for(const id of ids){const n=nodeBy(id),el=nodeElement(id);setBlockPosition(n,n.positions[mode]);if(!el)continue;const p=n.positions[mode];el.style.left=p.x+'px';el.style.top=p.y+'px';el.querySelector('.node-coordinates').textContent=`X ${Math.round(p.x)} · Y ${Math.round(p.y)}`;}renderGroups();drawEdges();}
+function blockPosition(subject){
+  if(subject.type==='pan')return camera();
+  return subject.type==='group'?groupBy(subject.id).positions[mode]:measureNode(nodeBy(subject.id));
+}
+function moveBlocks(subject,delta){
+  const group=subject.type==='group'?groupBy(subject.id):null;
+  const ids=new Set(group?group.members:[subject.id]);
+  const moving=[...ids].map(id=>canvasRects.get(id)),stationary=[...canvasRects.values()].filter(rect=>!ids.has(rect.id));
+  for(const p of [...moving,...(group?[group.positions[mode]]:[])]){
+    delta.x=Math.max(Math.min(0,-100000-p.x),Math.min(Math.max(0,100000-p.x),delta.x));
+    delta.y=Math.max(Math.min(0,-100000-p.y),Math.min(Math.max(0,100000-p.y),delta.y));
+  }
+  const shift=slideBlocks(moving,stationary,delta);
+  if(!shift.x&&!shift.y)return false;
+  if(group)setBlockPosition(group,{x:group.positions[mode].x+shift.x,y:group.positions[mode].y+shift.y});
+  for(const rect of moving){
+    rect.x+=shift.x;rect.y+=shift.y;
+    setBlockPosition(nodeBy(rect.id),{x:rect.x,y:Math.min(100000,rect.y)});
+    paintBlock(nodeElement(rect.id),rect);
+  }
+  return true;
+}
+function paintKeyMotion(m,delta){
+  if(m.subject.type==='pan'){camera().x+=delta.x;camera().y+=delta.y;applyCamera();return;}
+  m.moved=moveBlocks(m.subject,delta)||m.moved;renderGroups();drawEdges();
+}
 function finishKeyMotion(){
   cancelAnimationFrame(keyFrame);keyFrame=0;heldArrows.clear();if(!keyMotion)return;const m=keyMotion;keyMotion=null;
-  if(m.moved&&m.subject.type!=='pan'){history.push(m.before);if(history.length>60)history.shift();future=[];$('undo-btn').disabled=false;$('redo-btn').disabled=true;const form=$('node-form');if(m.subject.type==='node'&&selected?.id===m.subject.id&&form){form.elements.posX.value=Math.round(nodeBy(m.subject.id).positions[mode].x);form.elements.posY.value=Math.round(nodeBy(m.subject.id).positions[mode].y);}}
+  if(m.moved&&m.subject.type!=='pan'){renderNodes();renderGroups();drawEdges();history.push(m.before);if(history.length>60)history.shift();future=[];$('undo-btn').disabled=false;$('redo-btn').disabled=true;const form=$('node-form');if(m.subject.type==='node'&&selected?.id===m.subject.id&&form){form.elements.posX.value=Math.round(nodeBy(m.subject.id).positions[mode].x);form.elements.posY.value=Math.round(nodeBy(m.subject.id).positions[mode].y);}}
   save();
 }
 function beginKeyMotion(e){
-  if(!keyMotion){const subject=canMoveBlocks()&&selected&&['node','group'].includes(selected.type)?{...selected}:{type:'pan'};const positions=keyPositions(subject);keyMotion={subject,before:subject.type==='pan'?null:clone(doc),initial:positions.map(p=>({x:p.x,y:p.y})),started:performance.now(),last:performance.now(),vx:0,vy:0,moved:false,boost:e.shiftKey,settle:null};}
+  if(!keyMotion){const subject=canMoveBlocks()&&selected&&['node','group'].includes(selected.type)?{...selected}:{type:'pan'};keyMotion={subject,before:subject.type==='pan'?null:clone(doc),initial:{...blockPosition(subject)},started:performance.now(),last:performance.now(),vx:0,vy:0,moved:false,boost:e.shiftKey,settle:null};}
   keyMotion.boost=e.shiftKey;keyMotion.direction={x:e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0,y:e.key==='ArrowDown'?1:e.key==='ArrowUp'?-1:0};keyMotion.settle=null;heldArrows.add(e.key);if(!keyFrame)keyFrame=requestAnimationFrame(animateKeyMotion);
 }
 function animateKeyMotion(now){
-  keyFrame=0;const m=keyMotion;if(!m)return;const dt=Math.min(.04,Math.max(.001,(now-m.last)/1000));m.last=now;const positions=keyPositions(m.subject),pan=m.subject.type==='pan';
-  if(m.settle){m.settle.elapsed+=dt;const t=Math.min(1,m.settle.elapsed/.14),ease=1-Math.pow(1-t,3);positions.forEach((p,i)=>{p.x=m.settle.from[i].x+(m.settle.to[i].x-m.settle.from[i].x)*ease;p.y=m.settle.from[i].y+(m.settle.to[i].y-m.settle.from[i].y)*ease;});m.moved=true;paintKeyMotion();if(t>=1){finishKeyMotion();return;}}
+  keyFrame=0;const m=keyMotion;if(!m)return;const dt=Math.min(.04,Math.max(.001,(now-m.last)/1000));m.last=now;const p=blockPosition(m.subject),pan=m.subject.type==='pan';
+  if(m.settle){
+    m.settle.elapsed+=dt;
+    const t=Math.min(1,m.settle.elapsed/.14),ease=1-Math.pow(1-t,3),{from,to}=m.settle;
+    paintKeyMotion(m,{x:from.x+(to.x-from.x)*ease-p.x,y:from.y+(to.y-from.y)*ease-p.y});
+    if(t>=1){finishKeyMotion();return;}
+  }
   else{
     let dx=(heldArrows.has('ArrowRight')?1:0)-(heldArrows.has('ArrowLeft')?1:0),dy=(heldArrows.has('ArrowDown')?1:0)-(heldArrows.has('ArrowUp')?1:0);if(dx&&dy){dx/=Math.SQRT2;dy/=Math.SQRT2;}
     const speed=(pan?470:230/camera().z)*(m.boost?2.5:1),smooth=1-Math.exp(-dt*(heldArrows.size?16:25));m.vx+=(dx*speed-m.vx)*smooth;m.vy+=(dy*speed-m.vy)*smooth;
-    for(const p of positions){p.x+=m.vx*dt*(pan?-1:1);p.y+=m.vy*dt*(pan?-1:1);if(!pan){p.x=Math.max(-100000,Math.min(100000,p.x));p.y=Math.max(-100000,Math.min(100000,p.y));}}
-    if(Math.abs(m.vx)+Math.abs(m.vy)>.3)m.moved=true;paintKeyMotion();
-    if(!heldArrows.size&&Math.abs(m.vx)+Math.abs(m.vy)<3){if(!pan&&snap){const source=positions.map(p=>({...p}));m.settle={from:source,to:source.map(p=>({x:Math.round(p.x/20)*20,y:Math.round(p.y/20)*20})),elapsed:0};}else{finishKeyMotion();return;}}
+    const sign=pan?-1:1;
+    paintKeyMotion(m,{x:m.vx*dt*sign,y:m.vy*dt*sign});
+    if(!heldArrows.size&&Math.abs(m.vx)+Math.abs(m.vy)<3){
+      if(!pan&&snap){
+        const from={...blockPosition(m.subject)};
+        m.settle={from,to:{x:Math.round(from.x/20)*20,y:Math.round(from.y/20)*20},elapsed:0};
+      }else{finishKeyMotion();return;}
+    }
   }
   keyFrame=requestAnimationFrame(animateKeyMotion);
 }
 document.addEventListener('keyup',e=>{
   if(e.key==='Control'||e.key==='Meta')$('viewport').classList.remove('ctrl-held');
   if(!keyMotion)return;if(e.key==='Shift')keyMotion.boost=false;if(!heldArrows.has(e.key))return;heldArrows.delete(e.key);
-  if(!heldArrows.size&&performance.now()-keyMotion.started<130){const m=keyMotion,positions=keyPositions(m.subject),pan=m.subject.type==='pan',step=(pan?40:snap?20:10)*(m.boost?3:1),dir=m.direction;m.settle={from:positions.map(p=>({...p})),to:m.initial.map(p=>({x:p.x+dir.x*step*(pan?-1:1),y:p.y+dir.y*step*(pan?-1:1)})),elapsed:0};if(!keyFrame)keyFrame=requestAnimationFrame(animateKeyMotion);}
+  if(!heldArrows.size&&performance.now()-keyMotion.started<130){const m=keyMotion,pan=m.subject.type==='pan',step=(pan?-40:snap?20:10)*(m.boost?3:1),dir=m.direction;m.settle={from:{...blockPosition(m.subject)},to:{x:m.initial.x+dir.x*step,y:m.initial.y+dir.y*step},elapsed:0};if(!keyFrame)keyFrame=requestAnimationFrame(animateKeyMotion);}
 });
 window.addEventListener('blur',()=>{finishKeyMotion();$('viewport').classList.remove('ctrl-held');});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)finishKeyMotion();});
@@ -514,7 +600,7 @@ document.addEventListener('keydown',e=>{
   const editable=e.target.closest('input,textarea,select,[contenteditable=true]');
   if($('inspector').open&&(e.ctrlKey||e.metaKey)&&e.key==='Enter'){e.preventDefault();$('inspector').querySelector('form')?.requestSubmit();return;}
   if(e.key==='Escape'){if(isConnecting()||tool==='move'){setTool('select');return;}if(!$('help-dialog').open&&!$('export-dialog').open&&!editable){selected=null;render();}return;}
-  if(editable||$('account-dialog').open||$('inspector').open||$('projects-dialog').open||$('jump-dialog').open||$('help-dialog').open||$('export-dialog').open)return;
+  if(editable||(e.key==='Enter'&&e.target.closest('[data-code-fold]'))||$('account-dialog').open||$('inspector').open||$('projects-dialog').open||$('jump-dialog').open||$('help-dialog').open||$('export-dialog').open)return;
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)&&!e.ctrlKey&&!e.metaKey&&!e.altKey){e.preventDefault();beginKeyMotion(e);return;}
   if(e.key==='Shift'&&keyMotion)keyMotion.boost=true;
   if(e.key==='Enter'&&selected){e.preventDefault();renderInspector();openInspector();return;}

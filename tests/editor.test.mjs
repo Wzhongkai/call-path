@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EditorState} from '@codemirror/state';
 import {insertNewlineAndIndent,indentMore,indentLess} from '@codemirror/commands';
-import {languageExtension,indentationExtensions,codePreviewLines,compactPreviewLines} from '../src/editor.js';
+import {languageExtension,indentationExtensions,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines,changedLineRanges} from '../src/editor.js';
+import {reconcileLines,createDemo,validateDocument} from '../dist/model.js';
 test('C and Rust Enter uses configured automatic indentation',()=>{
   for(const [type,doc] of [['c','int main() {'],['rust','fn main() {']]){
     let state=EditorState.create({doc,selection:{anchor:doc.length},extensions:[languageExtension(type),...indentationExtensions(4)]});
@@ -60,4 +61,43 @@ test('compacted preview retains blank and hidden comment anchors for edges and i
   const shown=compactPreviewLines(lines.map((line,index)=>({...line,index})),anchors);
   assert.equal(shown[0].hiddenBlankAnchor,true);
   assert.equal(shown[1].text,'// note');
+});
+
+test('a long brace block folds while calls, multiline arguments, and anchors stay visible',()=>{
+  const work=Array.from({length:30},()=> '    total += 1;');
+  const source=['int f() {','  if (ready) {','    const char *s = "}"; // {',...work,'  }',
+    '  if (done) {','    run(','      total);',...work,'  }',
+    '  if (retry) {',...work,'  }','}'];
+  const code=source.map((text,index)=>({id:'line'+index,text}));
+  const analysis=analyzeCodePreview(code,'c');
+  const anchors=new Set([code.at(-3).id]);
+  const visible=compactPreviewLines(codePreviewLines(code,'c',analysis),anchors);
+  const rows=foldPreviewLines(visible,code,analysis,anchors);
+  assert.deepEqual(rows.filter(row=>row.fold).map(row=>row.fold.key),['1-33']);
+  assert.equal(rows.find(row=>row.id==='line2'),undefined);
+  for(const line of [1,33,35,36,code.length-3])assert.ok(rows.some(row=>row.index===line));
+  const expanded=foldPreviewLines(visible,code,analysis,anchors,new Set(['1-33']));
+  assert.deepEqual(expanded.filter(row=>!row.fold),visible);
+  assert.equal(expanded.find(row=>row.fold).fold.expanded,true);
+});
+
+test('10,000-line code validates, folds to a few rows and keeps stable IDs on distant edits',()=>{
+  const doc=createDemo(),node=doc.nodes[0];
+  const existing=node.code.map(line=>line.text);
+  const text=[...existing,'if (ready) {',...Array(10_000).fill('  total += 1;'),'}'].join('\n');
+  node.code=reconcileLines(node.code,text);
+  assert.equal(validateDocument(doc).nodes[0].code.length,existing.length+10_002);
+  const analysis=analyzeCodePreview(node.code);
+  const rows=compactPreviewLines(codePreviewLines(node.code,'javascript',analysis));
+  assert.equal(foldPreviewLines(rows,node.code,analysis,new Set()).filter(row=>row.fold).length,1);
+
+  const state=EditorState.create({doc:text});
+  const edit=state.update({changes:[
+    {from:state.doc.line(existing.length+2).from,insert:'  extra += 2;\n'},
+    {from:state.doc.line(existing.length+9_000).from,insert:'  other += 2;\n'}
+  ]});
+  const updated=reconcileLines(node.code,edit.newDoc.toString(),changedLineRanges(edit.changes,state.doc,edit.newDoc));
+  assert.equal(updated.map(line=>line.text).join('\n'),edit.newDoc.toString());
+  assert.equal(updated[existing.length+5001].id,node.code[existing.length+5000].id);
+  assert.equal(updated.at(-2).id,node.code.at(-2).id);
 });

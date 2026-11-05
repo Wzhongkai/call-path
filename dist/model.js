@@ -42,14 +42,53 @@ export function createDemo() {
 }
 // LCS retains identities of unchanged rows when code is inserted or removed.
 // Edited rows within the same gap keep their old identity where possible.
-export function reconcileLines(oldLines, text) {
+export function reconcileLines(oldLines, text, ranges=null) {
   const next = text.replace(/\r\n/g,'\n').split('\n');
-  if (next.length > 400) throw Error('单个函数最多支持 400 行代码');
+  if(ranges){
+    const result=[];
+    let previous=0;
+    for(const {start,end,newStart,newEnd} of ranges){
+      for(let i=previous;i<start;i++)result.push(oldLines[i]);
+      for(const line of reconcileLines(oldLines.slice(start,end),next.slice(newStart,newEnd).join('\n')))result.push(line);
+      previous=end;
+    }
+    for(let i=previous;i<oldLines.length;i++)result.push(oldLines[i]);
+    return result;
+  }
   const n=oldLines.length,m=next.length;
-  const dp=Array.from({length:n+1},()=>new Uint16Array(m+1));
-  for(let i=n-1;i>=0;i--) for(let j=m-1;j>=0;j--) dp[i][j]=oldLines[i].text===next[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
-  const matches=[];let i=0,j=0;
-  while(i<n&&j<m){if(oldLines[i].text===next[j]){matches.push([i,j]);i++;j++;}else if(dp[i+1][j]>=dp[i][j+1])i++;else j++;}
+  const matches=[];
+  let start=0,oldEnd=n,newEnd=m;
+  while(start<n&&start<m&&oldLines[start].text===next[start]){
+    matches.push([start,start]);start++;
+  }
+  // Bound the LCS table for bulk pastes and edits to long functions.
+  if((oldEnd-start)*(newEnd-start)>1_000_000){
+    while(oldEnd>start&&newEnd>start&&oldLines[oldEnd-1].text===next[newEnd-1]){
+      oldEnd--;newEnd--;
+    }
+  }
+  const oldSize=oldEnd-start,newSize=newEnd-start;
+  if(oldSize&&newSize&&oldSize*newSize<=1_000_000){
+    const dp=Array.from({length:oldSize+1},()=>new Uint32Array(newSize+1));
+    for(let i=oldSize-1;i>=0;i--)for(let j=newSize-1;j>=0;j--){
+      dp[i][j]=oldLines[start+i].text===next[start+j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+    }
+    let i=0,j=0;
+    while(i<oldSize&&j<newSize){
+      if(oldLines[start+i].text===next[start+j]){matches.push([start+i,start+j]);i++;j++;}
+      else if(dp[i+1][j]>=dp[i][j+1])i++;
+      else j++;
+    }
+  }else if(oldSize&&newSize){
+    const positions=new Map();
+    for(let j=start;j<newEnd;j++)positions.set(next[j],positions.has(next[j])?-1:j);
+    let last=start-1;
+    for(let i=start;i<oldEnd;i++){
+      const j=positions.get(oldLines[i].text);
+      if(j>last){matches.push([i,j]);last=j;}
+    }
+  }
+  for(let i=oldEnd,j=newEnd;i<n;i++,j++)matches.push([i,j]);
   const result=[];let oi=0,ni=0;
   for(const [o,k] of [...matches,[n,m]]){
     for(let p=ni;p<k;p++)result.push({id:oi+p-ni<o?oldLines[oi+p-ni].id:uid('line'),text:next[p]});
@@ -96,7 +135,7 @@ export function validateDocument(value){
   if(doc.layoutSync!==undefined&&typeof doc.layoutSync!=='boolean')fail();
   const ids=new Set();
   for(const n of doc.nodes){
-    if(typeof n.id!=='string'||!n.id||n.id.length>100||ids.has(n.id)||typeof n.name!=='string'||!n.name.trim()||n.name.length>100||!Array.isArray(n.tags)||n.tags.length>20||n.tags.some(t=>typeof t!=='string'||t.length>40)||!Array.isArray(n.code)||n.code.length<1||n.code.length>400||!/^#[\da-f]{6}$/i.test(n.color))fail();
+    if(typeof n.id!=='string'||!n.id||n.id.length>100||ids.has(n.id)||typeof n.name!=='string'||!n.name.trim()||n.name.length>100||!Array.isArray(n.tags)||n.tags.length>20||n.tags.some(t=>typeof t!=='string'||t.length>40)||!Array.isArray(n.code)||n.code.length<1||!/^#[\da-f]{6}$/i.test(n.color))fail();
     ids.add(n.id);
     for(const key of ['note','description'])if(typeof n[key]!=='string'||n[key].length>50000)fail();
     if(n.file!=null&&(typeof n.file!=='string'||n.file.length>500))fail();

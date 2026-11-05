@@ -83,6 +83,31 @@ fn workspace() -> Value {
 }
 
 #[tokio::test]
+async fn a_code_block_with_over_ten_thousand_lines_roundtrips() {
+    let temp = TempDir::new().unwrap();
+    let app = router(open_state(config(&temp)).await.unwrap());
+    let (cookie, _) = register(&app, "longcode").await;
+    let mut source = workspace();
+    let code = source["projects"][0]["document"]["nodes"][0]["code"]
+        .as_array_mut()
+        .unwrap();
+    code.extend(
+        (0..10_000).map(|index| json!({"id":format!("long-{index}"),"text":"    i += 1;"})),
+    );
+    let (status, _, saved) = request(
+        &app,
+        "PUT",
+        "/api/workspace",
+        Some(&cookie),
+        Some(json!({"revision":0,"workspace":source})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, _, loaded) = request(&app, "GET", "/api/workspace", Some(&cookie), None).await;
+    assert_eq!(loaded["workspace"], source);
+}
+
+#[tokio::test]
 async fn layout_sync_and_independent_positions_survive_workspace_and_share_roundtrips() {
     let temp = TempDir::new().unwrap();
     let cfg = config(&temp);

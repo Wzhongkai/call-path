@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {routeBetween,routeBlocks,returnAlong,pathFor} from '../dist/geometry.js';
+import {routeBetween,routeBlocks,routeConnection,returnAlong,pathFor,separateBlocks,slideBlocks} from '../dist/geometry.js';
 
 function samples(route){return route.flatMap(s=>Array.from({length:101},(_,i)=>{const t=i/100,u=1-t;return {x:u*u*u*s.from.x+3*u*u*t*s.c1.x+3*u*t*t*s.c2.x+t*t*t*s.to.x,y:u*u*u*s.from.y+3*u*u*t*s.c1.y+3*u*t*t*s.c2.y+t*t*t*s.to.y};}));}
 function assertClear(route,rects){
@@ -8,6 +8,39 @@ function assertClear(route,rects){
   for(const p of samples(route))for(const r of rects)assert.ok(!(p.x>r.x+1e-5&&p.x<r.x+r.w-1e-5&&p.y>r.y+1e-5&&p.y<r.y+r.h-1e-5),`path enters block at ${p.x},${p.y}`);
   for(let i=1;i<route.length;i++)assert.deepEqual(route[i-1].to,route[i].from);
 }
+
+test('overlapping blocks separate after a height change and restore their preferred positions when possible',()=>{
+  const blocks=[{id:'top',x:0,y:0,w:100,h:800},{id:'middle',x:80,y:200,w:100,h:100},{id:'bottom',x:90,y:340,w:100,h:100},{id:'other',x:220,y:200,w:100,h:100}];
+  assert.deepEqual(Object.fromEntries(separateBlocks(blocks).map(r=>[r.id,r.y])),{top:0,middle:816,bottom:932,other:200});
+  assert.deepEqual(separateBlocks([{...blocks[0],h:100},...blocks.slice(1)]).map(r=>r.y),[0,200,200,340]);
+  assert.equal(blocks[1].y,200);
+});
+
+test('drag and keyboard displacement cannot tunnel through blocks and can slide along their edge',()=>{
+  const moving=[{x:0,y:0,w:100,h:100},{x:0,y:220,w:100,h:100}];
+  const blockers=[{x:200,y:220,w:100,h:100}];
+  assert.deepEqual(slideBlocks(moving,blockers,{x:500,y:80}),{x:84,y:80});
+  assert.deepEqual(slideBlocks(moving.map(r=>({...r,x:84})),blockers,{x:1,y:250}),{x:0,y:250});
+});
+
+test('aligned stacked blocks connect along the same side and recursion ends at the requested row',()=>{
+  const a={x:0,y:0,w:352,h:1200},b={x:1,y:1300,w:352,h:400};
+  const stacked=routeConnection(a,b,{fromY:900,toY:1330});
+  assert.equal(stacked.segments.length,1);
+  assert.equal(stacked.startDir,-stacked.endDir);
+  assertClear(stacked.segments,[a,b]);
+  const recursive=routeConnection(a,a,{fromY:900,toY:30});
+  assert.deepEqual(recursive.segments.at(-1).to,{x:352,y:30});
+  assertClear(recursive.segments,[a]);
+});
+
+test('a block in the middle of a call is routed around while the original row anchors remain',()=>{
+  const a={x:0,y:0,w:200,h:500},b={x:700,y:0,w:200,h:500},blocker={x:300,y:120,w:250,h:320};
+  const route=routeConnection(a,b,{fromY:250,toY:270,obstacles:[blocker]});
+  assert.deepEqual(route.segments[0].from,{x:200,y:250});
+  assert.deepEqual(route.segments.at(-1).to,{x:700,y:270});
+  assertClear(route.segments,[a,b,blocker]);
+});
 
 test('an inner entry on the left is approached from the left even when the caller is to its right',()=>{const target={x:200,y:180};const route=routeBetween({x:650,y:100},target,{dir:-1,endDir:1,lane:400});assert.deepEqual(route.at(-1).to,target);assert.ok(route.at(-1).c2.x<target.x);assert.equal(route.length,3);});
 test('facing ports across a wide gap connect directly even on very tall code blocks',()=>{
