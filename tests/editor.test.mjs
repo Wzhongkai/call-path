@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EditorState} from '@codemirror/state';
+import {keymap} from '@codemirror/view';
 import {insertNewlineAndIndent,indentMore,indentLess} from '@codemirror/commands';
-import {languageExtension,indentationExtensions,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines,changedLineRanges} from '../src/editor.js';
+import {foldState,foldKeymap} from '@codemirror/language';
+import {languageExtension,indentationExtensions,sourceEditorSetup,analyzeCodePreview,codePreviewLines,compactPreviewLines,foldPreviewLines,changedLineRanges} from '../src/editor.js';
 import {reconcileLines,createDemo,validateDocument} from '../dist/model.js';
 test('C and Rust Enter uses configured automatic indentation',()=>{
   for(const [type,doc] of [['c','int main() {'],['rust','fn main() {']]){
@@ -15,6 +17,16 @@ test('selection indent and dedent preserve both selected code lines',()=>{
   const doc='alpha();\nbeta();';let state=EditorState.create({doc,selection:{anchor:0,head:doc.length},extensions:[languageExtension('javascript'),...indentationExtensions(4)]});
   const target={get state(){return state;},dispatch(tr){state=tr.state;}};
   indentMore(target);assert.equal(state.doc.toString(),'    alpha();\n    beta();');indentLess(target);assert.equal(state.doc.toString(),doc);
+});
+
+test('the source editor opens all lines and has no folding state or shortcuts',()=>{
+  const doc='int main() {\n  // Keep this comment\n\n  return 0;\n}';
+  const state=EditorState.create({doc,extensions:[sourceEditorSetup,languageExtension('c')]});
+  assert.equal(state.doc.toString(),doc);
+  assert.equal(state.field(foldState,false),undefined);
+  const bindings=state.facet(keymap).flat();
+  assert.ok(foldKeymap.every(binding=>!bindings.includes(binding)));
+  assert.ok(bindings.some(binding=>binding.key==='Mod-f'));
 });
 
 test('canvas preview removes real comments but keeps literals, directives and original line identities',()=>{

@@ -10,7 +10,9 @@
   },
   "packageManager": "pnpm@11.25.0",
   "dependencies": {
-    "codemirror": "6.0.2",
+    "@codemirror/autocomplete": "6.20.4",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/lint": "6.9.7",
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
     "@codemirror/commands": "6.11.1",

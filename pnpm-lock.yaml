@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@codemirror/autocomplete':
+        specifier: 6.20.4
+        version: 6.20.4
       '@codemirror/commands':
         specifier: 6.11.1
         version: 6.11.1
@@ -38,6 +41,12 @@ importers:
       '@codemirror/language':
         specifier: 6.13.1
         version: 6.13.1
+      '@codemirror/lint':
+        specifier: 6.9.7
+        version: 6.9.7
+      '@codemirror/search':
+        specifier: 6.7.2
+        version: 6.7.2
       '@codemirror/state':
         specifier: 6.7.6
         version: 6.7.6
@@ -47,9 +56,6 @@ importers:
       '@codemirror/view':
         specifier: 6.43.15
         version: 6.43.15
-      codemirror:
-        specifier: 6.0.2
-        version: 6.0.2
     devDependencies:
       esbuild:
         specifier: 0.28.2
@@ -296,9 +302,6 @@ packages:
 
   '@marijn/find-cluster-break@1.0.4':
     resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
-
-  codemirror@6.0.2:
-    resolution: {integrity: sha512-VhydHotNW5w1UGK0Qj96BwSk/Zqbp9WbnyK2W/eVMv4QyF41INRGpjUhFJY7/uDNuudSc33a/PKr4iDqRduvHw==}
 
   crelt@1.0.7:
     resolution: {integrity: sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==}
@@ -558,16 +561,6 @@ snapshots:
       '@lezer/lr': 1.4.11
 
   '@marijn/find-cluster-break@1.0.4': {}
-
-  codemirror@6.0.2:
-    dependencies:
-      '@codemirror/autocomplete': 6.20.4
-      '@codemirror/commands': 6.11.1
-      '@codemirror/language': 6.13.1
-      '@codemirror/lint': 6.9.7
-      '@codemirror/search': 6.7.2
-      '@codemirror/state': 6.7.6
-      '@codemirror/view': 6.43.15
 
   crelt@1.0.7: {}
 

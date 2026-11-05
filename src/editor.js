@@ -1,8 +1,13 @@
-import {basicSetup} from 'codemirror';
 import {EditorState,Compartment} from '@codemirror/state';
-import {EditorView,keymap} from '@codemirror/view';
-import {indentWithTab} from '@codemirror/commands';
-import {indentUnit} from '@codemirror/language';
+import {
+  EditorView,keymap,lineNumbers,highlightActiveLineGutter,highlightSpecialChars,
+  drawSelection,dropCursor,rectangularSelection,crosshairCursor,highlightActiveLine
+} from '@codemirror/view';
+import {defaultKeymap,history,historyKeymap,indentWithTab} from '@codemirror/commands';
+import {indentOnInput,indentUnit,syntaxHighlighting,defaultHighlightStyle,bracketMatching} from '@codemirror/language';
+import {autocompletion,closeBrackets,closeBracketsKeymap,completionKeymap} from '@codemirror/autocomplete';
+import {highlightSelectionMatches,searchKeymap} from '@codemirror/search';
+import {lintKeymap} from '@codemirror/lint';
 import {javascript} from '@codemirror/lang-javascript';
 import {python} from '@codemirror/lang-python';
 import {rust} from '@codemirror/lang-rust';
@@ -15,6 +20,18 @@ import {oneDark} from '@codemirror/theme-one-dark';
 
 export function languageExtension(type){return ({javascript:()=>javascript(),typescript:()=>javascript({typescript:true}),python,rust,c:cpp,cpp,java,go,sql,json,plain:()=>[]}[type]||javascript)();}
 export function indentationExtensions(size){return [EditorState.tabSize.of(size),indentUnit.of(' '.repeat(size))];}
+// Folding belongs to the canvas preview. Keep the full source in the editor.
+export const sourceEditorSetup=[
+  lineNumbers(),highlightActiveLineGutter(),highlightSpecialChars(),history(),
+  drawSelection(),dropCursor(),EditorState.allowMultipleSelections.of(true),
+  indentOnInput(),syntaxHighlighting(defaultHighlightStyle,{fallback:true}),bracketMatching(),
+  closeBrackets(),autocompletion(),rectangularSelection(),crosshairCursor(),
+  highlightActiveLine(),highlightSelectionMatches(),
+  keymap.of([
+    ...closeBracketsKeymap,...defaultKeymap,...searchKeymap,...historyKeymap,
+    ...completionKeymap,...lintKeymap,indentWithTab
+  ])
+];
 const callSyntax=/^(CallExpression|CallExpr|NewExpression|MethodInvocation|ObjectCreationExpression|MacroInvocation|ExplicitConstructorInvocation|TaggedTemplateExpression)$/;
 const MIN_FOLD_ROWS=5;
 // Use the same language parser as the editor to distinguish code from strings and comments.
@@ -146,7 +163,7 @@ export function changedLineRanges(changes,before,after){
 export function createCodeEditor({parent,doc,language='javascript',indentSize=4,onChange,readOnly=false}){
   const languageSlot=new Compartment(),indentSlot=new Compartment();
   const view=new EditorView({parent,state:EditorState.create({doc,extensions:[
-    basicSetup,keymap.of([indentWithTab]),oneDark,EditorState.readOnly.of(readOnly),EditorView.editable.of(!readOnly),
+    sourceEditorSetup,oneDark,EditorState.readOnly.of(readOnly),EditorView.editable.of(!readOnly),
     languageSlot.of(languageExtension(language)),indentSlot.of(indentationExtensions(indentSize)),
     EditorView.contentAttributes.of({'aria-label':'代码编辑器','aria-readonly':String(readOnly),tabindex:'0',spellcheck:'false'}),
     EditorView.theme({
