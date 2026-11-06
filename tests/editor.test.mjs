@@ -110,21 +110,28 @@ test('short mixed C functions fold work between calls while keeping complete cal
   for(const index of [0,1,2,9,10,11,12,13,14,15])assert.ok(rows.some(row=>row.index===index),source[index]);
 });
 
-test('a call-heavy block hides other rows even with no brace folds, preserving unlinked calls and their arguments',()=>{
-  const work=Array.from({length:140},()=>['  i += 1;','  step(i);']).flat();
-  const source=['int f() {','  int i = 0;',...work,'  finish(','    i);','  return i;','}'];
+test('the default preview folds inside braces and preserves function signatures, braces and calls',()=>{
+  const source=['int f(int input)','{','  int i = input;','  i += 1;','  i += 2;',
+    '  finish(','    i);','  i += 3;','  i += 4;','  return i;','}'];
   const code=source.map((text,index)=>({id:'line'+index,text}));
-  const anchors=new Set(['line1','line284']);
+  const anchors=new Set(['line9']);
   const analysis=analyzeCodePreview(code,'c');
   const visible=compactPreviewLines(codePreviewLines(code,'c',analysis),anchors);
-  assert.equal(foldPreviewLines(visible,code,analysis,anchors).length,source.length);
   const compact=canvasCodePreview(visible,code,analysis,anchors);
-  const expected=visible.filter(line=>anchors.has(line.id)||/step|finish|    i\);/.test(line.text));
-  assert.deepEqual(compact.rows,[...expected,{hiddenRows:source.length-expected.length}]);
-  assert.equal(compact.expanded,false);
+  assert.deepEqual(compact.rows.filter(row=>row.id).map(row=>row.index),[0,1,5,6,9,10]);
+  assert.deepEqual(compact.rows.filter(row=>row.fold).map(row=>row.fold.key),['1-5','6-9']);
   const open=canvasCodePreview(visible,code,analysis,anchors,{expanded:true});
-  assert.deepEqual(open.rows,visible);
-  assert.equal(open.expanded,true);
+  assert.deepEqual(open.rows.filter(row=>row.id),visible);
+  assert.ok(open.rows.filter(row=>row.fold).every(row=>row.fold.expanded));
+});
+
+test('outer folds preserve nested function signatures and do not hide unbraced code',()=>{
+  const source=['function outer() {','  let x = 0;','  x++;','  function inner(','    value','  ) {','    x += value;','    x++;','  }','}','let outside = 1;','outside++;'];
+  const code=source.map((text,index)=>({id:'line'+index,text}));
+  const analysis=analyzeCodePreview(code);
+  const rows=canvasCodePreview(codePreviewLines(code,'javascript',analysis),code,analysis,new Set()).rows;
+  assert.deepEqual(rows.filter(row=>row.id).map(row=>row.index),[0,3,4,5,8,9,10,11]);
+  assert.deepEqual(rows.filter(row=>row.fold).map(row=>row.fold.key),['0-3','5-8']);
 });
 
 test('10,000-line code validates, folds to a few rows and keeps stable IDs on distant edits',()=>{

@@ -9,6 +9,11 @@ import {dismissOnBackdrop} from './dialog.js';
 import {shareTokenFromUrl,connectShared,mountSharedView,mountSharing} from './share.js';
 import {installPinchNavigation} from './touch.js';
 
+const themePreference='callpath.theme';
+let lightTheme=false;
+try{lightTheme=localStorage.getItem(themePreference)==='light';}catch{}
+document.documentElement.dataset.theme=lightTheme?'light':'dark';
+
 const shareToken=shareTokenFromUrl(location.href);
 const account=shareToken===null?await connectAccount():await connectShared(shareToken);
 const readOnly=Boolean(account.readonly);
@@ -101,13 +106,11 @@ function nestedEntries(n){return (n.innerFunctions||[]).map(entry=>({...entry,li
 function endpointTitle(edge,end){const n=nodeBy(edge[end]),entry=nestedEntries(n).find(entry=>entry.id===edge[end+'Entry']);return entry?entry.scope:n.name;}
 function entryPort(n,entry){return `<button class="entry-port" data-inner-entry="${esc(n.id)}" data-inner-id="${esc(entry.id)}" data-inner-line="${esc(entry.lineId)}" aria-label="调用内部函数 ${esc(entry.name)}" title="${esc(entry.scope)} · 第 ${entry.lineIndex+1} 行入口"></button>`;}
 const foldLabel=fold=>`第 ${fold.start+2}–${fold.end} 行（${fold.end-fold.start-1} 行）`;
-const foldedSummary=count=>`已收起 ${count} 行代码`;
-function foldToggleMarkup({expanded,hiddenRows}){
-  const label=hiddenRows?(expanded?'收起代码预览':'展开代码预览'):'已显示全部可预览代码';
-  return `<button type="button" class="node-fold-toggle" data-toggle-folds title="${label}" aria-label="${label}" ${hiddenRows?`aria-expanded="${expanded}"`:'disabled'}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${expanded?'M4 10l4-4 4 4':'M4 6l4 4 4-4'}"/></svg></button>`;
+function foldToggleMarkup({expanded,foldable}){
+  const label=foldable?(expanded?'收起代码预览':'展开代码预览'):'没有可折叠段落';
+  return `<button type="button" class="node-fold-toggle" data-toggle-folds title="${label}" aria-label="${label}" ${foldable?`aria-expanded="${expanded}"`:'disabled'}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="${expanded?'M4 10l4-4 4 4':'M4 6l4 4 4-4'}"/></svg></button>`;
 }
 function codeLineMarkup(n,line,linked,entries){
-  if(line.hiddenRows)return `<div class="code-fold-summary">${foldedSummary(line.hiddenRows)}</div>`;
   if(line.fold){
     const fold=line.fold;
     return `<button type="button" class="code-fold" data-code-fold="${fold.key}" aria-expanded="${fold.expanded}">${fold.expanded?'▾ 收起':'▸ 展开'} ${foldLabel(fold)}</button>`;
@@ -224,7 +227,7 @@ function edgeGeometry(e,cache){
 function drawEdges(){
   const matches=visible(),geometry=new Map();
   const chosen=selected?.type==='edge'?edgeBy(selected.id):null,callId=chosen?.type==='return'?chosen.callId:chosen?.id;
-  const defs=`<defs><marker id="arrow-call" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="#71c9ef" stroke-width="1.3"/></marker><marker id="arrow-return" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="#b5a1e7" stroke-width="1.3"/></marker></defs>`;
+  const defs=`<defs><marker id="arrow-call" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="var(--call)" stroke-width="1.3"/></marker><marker id="arrow-return" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 8 4 L 0 8" fill="none" stroke="var(--return)" stroke-width="1.3"/></marker></defs>`;
   $('edges').innerHTML=defs+doc.edges.map(e=>{const g=edgeGeometry(e,geometry);if(!g)return '';return `<g class="edge ${e.type} ${selected?.type==='edge'&&selected.id===e.id?'selected':''} ${callId&&(e.id===callId||e.callId===callId)?'related':''} ${matches.has(e.from)&&matches.has(e.to)?'':'dimmed'}" data-edge="${esc(e.id)}" role="button" tabindex="0" aria-label="${esc(endpointTitle(e,'from'))} ${e.type==='call'?'调用':'返回到'} ${esc(endpointTitle(e,'to'))}"><path class="hit-path" d="${g.d}"/><path class="visible-path" d="${g.d}" marker-end="url(#arrow-${e.type})"/></g>`;}).join('');
 }
 function applyCamera(){const c=camera();$('scene').style.transform=`translate(${c.x}px,${c.y}px) scale(${c.z})`;$('zoom-value').textContent=Math.round(c.z*100)+'%';$('viewport').style.backgroundPosition=`${c.x}px ${c.y}px`;$('viewport').style.backgroundSize=`${20*c.z}px ${20*c.z}px`;}
@@ -254,7 +257,7 @@ function renderInnerMarkers(){
   if(readOnly){list.querySelectorAll('input').forEach(input=>input.readOnly=true);list.querySelectorAll('[data-inner-remove]').forEach(button=>button.hidden=true);}
   list.querySelectorAll('[data-inner-locate]').forEach(button=>button.addEventListener('click',()=>{const entry=innerDraft.find(entry=>entry.id===button.dataset.innerLocate),index=lines.findIndex(line=>line.id===entry.lineId);if(index<0){toast('对应代码行已删除，请重新选择行号');return;}const offset=lines.slice(0,index).reduce((total,line)=>total+line.text.length+1,0);codeEditor?.reveal(offset,offset+lines[index].text.length);}));
 }
-function mountCodeEditor(){const panel=$('inspector'),host=panel.querySelector('.cm-host'),source=panel.querySelector('textarea[name="code"]');if(codeEditor||!host||!source)return;const form=source.closest('form');codeEditor=createCodeEditor({parent:host,doc:source.value,language:form.elements.language.value,indentSize:Number(form.elements.indentSize.value),readOnly,onChange:(value,ranges)=>{source.value=value;try{editorLines=reconcileLines(editorLines||nodeBy(selected.id).code,value,ranges);renderInnerMarkers();}catch{}}});form.elements.language.addEventListener('change',()=>codeEditor?.setLanguage(form.elements.language.value));form.elements.indentSize.addEventListener('change',()=>codeEditor?.setIndentSize(Number(form.elements.indentSize.value)));renderInnerMarkers();}
+function mountCodeEditor(){const panel=$('inspector'),host=panel.querySelector('.cm-host'),source=panel.querySelector('textarea[name="code"]');if(codeEditor||!host||!source)return;const form=source.closest('form');codeEditor=createCodeEditor({parent:host,doc:source.value,language:form.elements.language.value,indentSize:Number(form.elements.indentSize.value),readOnly,light:lightTheme,onChange:(value,ranges)=>{source.value=value;try{editorLines=reconcileLines(editorLines||nodeBy(selected.id).code,value,ranges);renderInnerMarkers();}catch{}}});form.elements.language.addEventListener('change',()=>codeEditor?.setLanguage(form.elements.language.value));form.elements.indentSize.addEventListener('change',()=>codeEditor?.setIndentSize(Number(form.elements.indentSize.value)));renderInnerMarkers();}
 function openInspector(){if(mobileLayout.matches&&document.querySelector('.app').classList.contains('mobile-sidebar-open'))mobileSidebar(false);finishKeyMotion();if(selected&&!$('inspector').open)$('inspector').showModal();mountCodeEditor();codeEditor?.measure();}
 function select(type,id,edit=true){finishKeyMotion();selected={type,id};multi.clear();$('group-btn').textContent='▧ 分区';$('edit-selection').disabled=false;renderSidebar();for(const el of $('nodes').children){el.classList.toggle('selected',type==='node'&&el.dataset.node===id);el.classList.remove('multi-selected');for(const row of el.querySelectorAll('[data-line]'))row.classList.toggle('jump-focus',focusedLine?.node===el.dataset.node&&focusedLine.line===row.dataset.line);}for(const el of $('groups').children)el.classList.toggle('selected',type==='group'&&el.dataset.group===id);renderInspector();drawEdges();if(edit)openInspector();}
 function jumpToNode(id,line=null){if(!nodeBy(id))return;if($('inspector').open)$('inspector').close();if(isConnecting())setTool('select');focusedLine=line?{node:id,line}:null;if(mode==='code'&&line){renderNodes();renderGroups();}select('node',id,false);centerNode(id,line);$('viewport').focus();toast('已定位到 '+nodeBy(id).name+(mode==='code'&&line?' 的对应代码行':''));}
@@ -396,12 +399,27 @@ function exportSvg(){
   const ids=new Set(chosen.map(n=>n.id));
   const geometry=new Map();
   const paths=doc.edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).map(e=>{const g=edgeGeometry(e,geometry);return `<g><path d="${g.d}" fill="none" stroke="${e.type==='call'?'#71c9ef':'#b5a1e7'}" stroke-width="1.7" ${e.type==='return'?'stroke-dasharray="6 5"':''} marker-end="url(#arrow)"/></g>`;}).join('');
-  const blocks=chosen.map(n=>{const r=measureNode(n);return `<g transform="translate(${r.x} ${r.y})"><rect width="${r.w}" height="${r.h}" rx="9" fill="#192536" stroke="${n.color}"/><text x="17" y="32" fill="${n.color}" font-size="14">ƒ  ${esc(n.name)}()</text><path d="M0 56H${r.w}" stroke="#414956"/>${mode==='code'?canvasPreview(n).rows.map((l,i)=>`<text x="14" y="${83+i*24}" fill="#c2cbd7" font-size="10" xml:space="preserve">${l.fold||l.hiddenRows?'⋯':String(l.index+1).padStart(2,' ')}  ${esc((l.hiddenRows?foldedSummary(l.hiddenRows):l.fold?foldLabel(l.fold):l.hiddenCommentAnchor?'注释已隐藏 · 连线锚点':l.hiddenBlankAnchor?'空行 · 连线锚点':l.text).slice(0,51))}</text>`).join(''):`<text x="16" y="81" font-size="11" fill="#a6b1c0">${esc(n.description.slice(0,25))}</text>`}<text x="16" y="${r.h-39}" font-size="10" fill="${n.color}">${esc(n.tags.join(' · ').slice(0,45))}</text><text x="16" y="${r.h-12}" font-size="9" fill="#8f9cae">${esc((n.note?'▤ '+n.note.split('\n')[0]:'无备注').slice(0,40))}</text></g>`;}).join('');
+  const blocks=chosen.map(n=>{const r=measureNode(n);return `<g transform="translate(${r.x} ${r.y})"><rect width="${r.w}" height="${r.h}" rx="9" fill="#192536" stroke="${n.color}"/><text x="17" y="32" fill="${n.color}" font-size="14">ƒ  ${esc(n.name)}()</text><path d="M0 56H${r.w}" stroke="#414956"/>${mode==='code'?canvasPreview(n).rows.map((l,i)=>`<text x="14" y="${83+i*24}" fill="#c2cbd7" font-size="10" xml:space="preserve">${l.fold?'⋯':String(l.index+1).padStart(2,' ')}  ${esc((l.fold?foldLabel(l.fold):l.hiddenCommentAnchor?'注释已隐藏 · 连线锚点':l.hiddenBlankAnchor?'空行 · 连线锚点':l.text).slice(0,51))}</text>`).join(''):`<text x="16" y="81" font-size="11" fill="#a6b1c0">${esc(n.description.slice(0,25))}</text>`}<text x="16" y="${r.h-39}" font-size="10" fill="${n.color}">${esc(n.tags.join(' · ').slice(0,45))}</text><text x="16" y="${r.h-12}" font-size="9" fill="#8f9cae">${esc((n.note?'▤ '+n.note.split('\n')[0]:'无备注').slice(0,40))}</text></g>`;}).join('');
   const groupShapes=(doc.groups||[]).filter(g=>g.members.some(id=>ids.has(id))).map(g=>{const r=groupBounds(g);return `<g><rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="14" fill="${g.color}" fill-opacity=".03" stroke="${g.color}" stroke-opacity=".5" stroke-dasharray="6 5"/><text x="${r.x+15}" y="${r.y+22}" fill="${g.color}" font-size="11">${esc(g.name)}</text></g>`;}).join('');
   download(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${maxX-minX} ${maxY-minY}" width="${maxX-minX}" height="${maxY-minY}" style="background:#0c1220;font-family:Consolas,'Microsoft YaHei',monospace"><defs><marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#71c9ef"/></marker></defs><rect x="${minX}" y="${minY}" width="${maxX-minX}" height="${maxY-minY}" fill="#0c1220"/><text x="${minX+30}" y="${minY+35}" fill="#e5edf8" font-size="16">${esc(doc.title)} · ${mode==='logic'?'逻辑模式':'代码模式'}</text>${groupShapes}${paths}${blocks}</svg>`,'image/svg+xml;charset=utf-8','svg');toast('当前视图已导出为 SVG');
 }
 
 // Application controls
+function paintTheme(){
+  document.documentElement.dataset.theme=lightTheme?'light':'dark';
+  document.querySelector('meta[name="theme-color"]').content=lightTheme?'#f7f9fc':'#0c1220';
+  const button=$('theme-btn');
+  button.setAttribute('aria-pressed',String(lightTheme));
+  button.title=lightTheme?'切换到深色模式':'切换到浅色模式';
+  button.textContent=lightTheme?'☾':'☀';
+}
+paintTheme();
+$('theme-btn').addEventListener('click',()=>{
+  lightTheme=!lightTheme;
+  paintTheme();
+  try{localStorage.setItem(themePreference,lightTheme?'light':'dark');}catch{}
+});
+
 document.querySelectorAll('[data-mode]').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
 $('layout-sync-btn').addEventListener('click',()=>{
   if(readOnly)return;

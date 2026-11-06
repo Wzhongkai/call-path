@@ -33,11 +33,13 @@ export const sourceEditorSetup=[
   ])
 ];
 const callSyntax=/^(CallExpression|CallExpr|NewExpression|MethodInvocation|ObjectCreationExpression|MacroInvocation|ExplicitConstructorInvocation|TaggedTemplateExpression)$/;
-const MIN_FOLD_ROWS=5;
+const functionSyntax=/^(FunctionDefinition|FunctionDeclaration|FunctionExpression|FunctionItem|FunctionDecl|MethodDecl|MethodDeclaration|ConstructorDeclaration|ArrowFunction)$/;
+const functionBody=/^(Block|CompoundStatement|Body|ConstructorBody)$/;
+const MIN_FOLD_ROWS=2;
 // Use the same language parser as the editor to distinguish code from strings and comments.
 export function analyzeCodePreview(lines,language='javascript'){
   const text=lines.map(line=>line.text).join('\n'),parser=languageExtension(language)?.language?.parser;
-  const comments=[],braces=[],calls=[],starts=[0];
+  const comments=[],braces=[],calls=[],signatures=[],starts=[0];
   for(const line of lines)starts.push(starts.at(-1)+line.text.length+1);
   function lineAt(offset){
     let low=0,high=lines.length;
@@ -47,6 +49,11 @@ export function analyzeCodePreview(lines,language='javascript'){
   if(parser)parser.parse(text).iterate({enter(node){
     if(/comment/i.test(node.name)){comments.push({from:node.from,to:node.to});return false;}
     if(callSyntax.test(node.name))calls.push([lineAt(node.from),lineAt(Math.max(node.from,node.to-1))]);
+    if(functionSyntax.test(node.name)){
+      let body=node.node.firstChild;
+      while(body&&!functionBody.test(body.name))body=body.nextSibling;
+      if(body)signatures.push([lineAt(node.from),lineAt(body.from)]);
+    }
     if(node.name==='{'&&node.from<node.to){
       const open=node.node,close=open.parent?.lastChild;
       if(close?.name==='}'&&close.from<close.to){
@@ -65,7 +72,7 @@ export function analyzeCodePreview(lines,language='javascript'){
       }
     }
   }});
-  return {comments,braces,calls};
+  return {comments,braces,calls,signatures};
 }
 export function codePreviewLines(lines,language='javascript',analysis=analyzeCodePreview(lines,language)){
   let firstComment=0;
@@ -94,7 +101,9 @@ export function compactPreviewLines(lines,anchorIds=new Set()){
 export function foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,toggled=new Set(),defaultExpanded=false){
   if(!analysis.braces.length)return visibleLines;
   const protectedLines=new Int32Array(sourceLines.length+1);
-  for(const [start,end] of analysis.calls){protectedLines[start]++;protectedLines[end+1]--;}
+  for(const spans of [analysis.calls,analysis.signatures]){
+    for(const [start,end] of spans){protectedLines[start]++;protectedLines[end+1]--;}
+  }
   let calls=0,protectedCount=0;
   for(const [index,line] of sourceLines.entries()){
     calls+=protectedLines[index];
@@ -149,19 +158,8 @@ export function foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,tog
   return result.concat(visibleLines.slice(row));
 }
 export function canvasCodePreview(visibleLines,sourceLines,analysis,anchorIds,{expanded=false,collapsedFolds}={}){
-  let call=0,callEnd=-1;
-  const keptRows=visibleLines.filter(line=>{
-    while(call<analysis.calls.length&&analysis.calls[call][0]<=line.index){
-      callEnd=Math.max(callEnd,analysis.calls[call++][1]);
-    }
-    return line.index<=callEnd||anchorIds.has(line.id);
-  });
-  const hiddenRows=visibleLines.length-keptRows.length;
-  if(!hiddenRows)return {rows:visibleLines,hiddenRows,expanded:false};
-  const rows=expanded
-    ?foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,collapsedFolds,true)
-    :[...keptRows,{hiddenRows}];
-  return {rows,hiddenRows,expanded};
+  const rows=foldPreviewLines(visibleLines,sourceLines,analysis,anchorIds,collapsedFolds,expanded);
+  return {rows,foldable:rows.some(row=>row.fold),expanded};
 }
 export function changedLineRanges(changes,before,after){
   const ranges=[];
@@ -175,24 +173,24 @@ export function changedLineRanges(changes,before,after){
   });
   return ranges;
 }
-export function createCodeEditor({parent,doc,language='javascript',indentSize=4,onChange,readOnly=false}){
+export function createCodeEditor({parent,doc,language='javascript',indentSize=4,onChange,readOnly=false,light=false}){
   const languageSlot=new Compartment(),indentSlot=new Compartment();
   const view=new EditorView({parent,state:EditorState.create({doc,extensions:[
-    sourceEditorSetup,oneDark,EditorState.readOnly.of(readOnly),EditorView.editable.of(!readOnly),
+    sourceEditorSetup,light?[]:oneDark,EditorState.readOnly.of(readOnly),EditorView.editable.of(!readOnly),
     languageSlot.of(languageExtension(language)),indentSlot.of(indentationExtensions(indentSize)),
     EditorView.contentAttributes.of({'aria-label':'代码编辑器','aria-readonly':String(readOnly),tabindex:'0',spellcheck:'false'}),
     EditorView.theme({
-      '&':{height:'100%',backgroundColor:'#101a2a',color:'#d0dced',fontSize:'13px'},
+      '&':{height:'100%',backgroundColor:'var(--code-bg, #101a2a)',color:'var(--code-text, #d0dced)',fontSize:'13px'},
       '.cm-scroller':{fontFamily:'"IBM Plex Mono",Consolas,monospace',lineHeight:'1.8',overflow:'auto'},
-      '.cm-content':{padding:'13px 0',caretColor:'#9cd6ff'},
+      '.cm-content':{padding:'13px 0',caretColor:'var(--accent)'},
       '.cm-line':{padding:'0 12px'},
-      '.cm-gutters':{backgroundColor:'#142135',color:'#7c93b1',border:'none',paddingRight:'5px'},
+      '.cm-gutters':{backgroundColor:'var(--code-gutter, #142135)',color:'var(--code-line-number, #7c93b1)',border:'none',paddingRight:'5px'},
       '.cm-activeLine,.cm-activeLineGutter':{backgroundColor:'#65b9ff0c'},
-      '.cm-cursor':{borderLeftColor:'#9cd6ff'},
+      '.cm-cursor':{borderLeftColor:'var(--accent)'},
       '&.cm-focused':{outline:'none'},
-      '.cm-panels':{backgroundColor:'#1c3049',color:'#c5def7'},
-      '.cm-search input':{backgroundColor:'#101f32',color:'#d1e6fb',border:'1px solid #4b6b91',borderRadius:'3px'},
-      '.cm-tooltip':{backgroundColor:'#1c2e46',border:'1px solid #4b6b91'}
+      '.cm-panels':{backgroundColor:'var(--code-panel, #1c3049)',color:'var(--code-text, #c5def7)'},
+      '.cm-search input':{backgroundColor:'var(--code-bg, #101f32)',color:'var(--code-text, #d1e6fb)',border:'1px solid var(--code-border, #4b6b91)',borderRadius:'3px'},
+      '.cm-tooltip':{backgroundColor:'var(--code-panel, #1c2e46)',border:'1px solid var(--code-border, #4b6b91)'}
     }),
     EditorView.updateListener.of(update=>{
       if(update.docChanged)onChange(update.state.doc.toString(),changedLineRanges(update.changes,update.startState.doc,update.state.doc));
